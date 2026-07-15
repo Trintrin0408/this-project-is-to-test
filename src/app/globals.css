@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+/* Hệ thống dùng nền sáng cố định cho vùng nội dung (CLAUDE.md mục 3) — không bật dark mode theo OS. */
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Ẩn thanh cuộn trên toàn site (mọi phần tử overflow) — nội dung vẫn cuộn được bình thường bằng
+   chuột/trackpad/phím, chỉ ẩn thanh scrollbar hiển thị trên màn hình. */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge cũ */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Edge (Chromium) */
+}
