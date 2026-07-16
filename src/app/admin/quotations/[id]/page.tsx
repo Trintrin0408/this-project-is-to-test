@@ -132,7 +132,10 @@ export default function AdminQuotationDetailPage() {
 
   const handleOpenSurveyModal = () => {
     if (row.status === 'draft') {
-      router.push(linkedSurveyPlan ? '/admin/coordination/planning' : `/admin/coordination/planning?quotationId=${row.quotationId}`);
+      // Luôn kèm ?quotationId= dù đã có kế hoạch hay chưa — trang Kế hoạch & phân công tự phát hiện
+      // kế hoạch đã liên kết (getAdminSchedulePlanByQuotationId) để mở đúng drawer sửa kế hoạch đó,
+      // thay vì chỉ đưa về danh sách chung rồi bắt tìm lại thủ công.
+      router.push(`/admin/coordination/planning?quotationId=${row.quotationId}`);
       return;
     }
     setSurveyForm(row.surveyAssignment ?? { assigneeName: ASSIGNEE_POOL[0], date: row.createdAt, time: '09:00', notes: '' });

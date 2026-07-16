@@ -2,16 +2,19 @@
 
 Web application for the **Binh Nguyen Wedding Event Management System (BNWEMS)** for Admin and Manager roles. Built with Next.js 16 (App Router) + TypeScript + TailwindCSS v4 + Axios.
 
-> ⚠️ **Trạng thái hiện tại: KHÔNG gọi API/backend thật — chỉ tập trung thiết kế giao diện (UI thuần).**
+> **
+>
+> sử dụng api giả lập
 > Backend (`D:\bnwems-backend-api`) hiện đang lỗi (Aiven cloud DB lệch schema so với
 > `prisma/schema.prisma`, mọi request đều trả `400 DB_ERROR` — xem `docs/more-require.md` mục (jj)).
 > Trong lúc chờ backend/DB owner khắc phục, màn hình đăng nhập tạm dùng 2 tài khoản ảo cố định
 > (`src/mocks/authAccounts.ts`), không gọi `POST /auth/login` thật:
 >
-> | Tài khoản | Mật khẩu     | Vai trò |
-> | --------- | ------------ | ------- |
-> | `admin`   | `Admin@123`  | Admin   |
-> | `manager` | `Manager@123`| Manager |
+>
+> | Tài khoản | Mật khẩu    | Vai trò |
+> | ----------- | ------------- | -------- |
+> | `admin`     | `Admin@123`   | Admin    |
+> | `manager`   | `Manager@123` | Manager  |
 >
 > Các màn hình khác vẫn giữ nguyên code gọi `services/*.service.ts` như cũ (chưa xóa), nhưng vì
 > backend đang lỗi nên phần lớn sẽ không tải được dữ liệu thật — trọng tâm hiện tại là xây/tinh
@@ -19,6 +22,7 @@ Web application for the **Binh Nguyen Wedding Event Management System (BNWEMS)**
 > backend đăng nhập được bình thường trở lại.
 
 ## Tech Stack
+
 
 | Layer       | Technology                              |
 | ----------- | --------------------------------------- |
@@ -46,6 +50,7 @@ The app will run at `http://localhost:3000`.
 
 ## Available Scripts
 
+
 | Script                  | Description                      |
 | ----------------------- | -------------------------------- |
 | `npm run dev`           | Start Next.js development server |
@@ -58,14 +63,15 @@ The app will run at `http://localhost:3000`.
 
 This frontend talks to a separate backend project, **not part of this repo**:
 
-|               |                                                                                                                                                                 |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local path    | `D:\bnwems-backend-api`                                                                                                                                         |
-| Remote        | https://github.com/uchihamasuba/bnwems-backend-api (branch `develop`)                                                                                           |
-| Stack         | Node.js (v22 LTS) + Express + TypeScript + Prisma ORM + MySQL                                                                                                   |
+
+|               |                                                                                                                                                                  |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local path    | `D:\bnwems-backend-api`                                                                                                                                          |
+| Remote        | https://github.com/uchihamasuba/bnwems-backend-api (branch`develop`)                                                                                             |
+| Stack         | Node.js (v22 LTS) + Express + TypeScript + Prisma ORM + MySQL                                                                                                    |
 | Port          | `3001` (see `.env` → `PORT=3001`; matches `NEXT_PUBLIC_API_BASE_URL` in this repo's `.env.local`)                                                               |
-| CORS          | Backend only allows `CORS_ORIGIN=http://localhost:3000` (this app's dev port)                                                                                   |
-| Start         | `npm run dev` inside `D:\bnwems-backend-api` (ts-node, auto-reload). Success message: `Server running on port 3001`                                             |
+| CORS          | Backend only allows`CORS_ORIGIN=http://localhost:3000` (this app's dev port)                                                                                     |
+| Start         | `npm run dev` inside `D:\bnwems-backend-api` (ts-node, auto-reload). Success message: `Server running on port 3001`                                              |
 | Logs          | **stdout/stderr only** — plain `console.log`/`console.error`, no log file, no morgan/winston. Logs only exist while the dev server process is running/attached. |
 | DB inspection | `npx prisma studio` inside the backend repo → `http://localhost:5555`                                                                                           |
 

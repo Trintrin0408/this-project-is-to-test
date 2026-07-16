@@ -17,6 +17,7 @@ import {
   PlanStatus,
   SchedulePlan,
   deleteAdminSchedulePlan,
+  getAdminSchedulePlanByQuotationId,
   getAdminSchedulePlans,
   getPlanStatusInfo,
   saveAdminSchedulePlan,
@@ -72,6 +73,9 @@ function AdminPlanningPageContent() {
   const prefillOrderId = searchParams.get('orderId') ?? undefined;
   const prefillQuotationId = searchParams.get('quotationId') ?? undefined;
   const prefillQuotation = prefillQuotationId ? getAdminQuotationById(prefillQuotationId) : undefined;
+  // Báo giá này đã có kế hoạch khảo sát liên kết chưa — nếu có, mở thẳng drawer SỬA kế hoạch đó thay
+  // vì lại mở form tạo mới (khớp nút "Đổi lịch phân công" ở trang chi tiết báo giá).
+  const existingPlanForQuotation = prefillQuotationId ? getAdminSchedulePlanByQuotationId(prefillQuotationId) : undefined;
   // Báo giá chưa có đơn đặt thật (chỉ tồn tại trước khi duyệt) — dựng 1 lựa chọn "đơn đặt ảo" từ
   // thông tin báo giá để tái dùng chung form tạo kế hoạch, phục vụ lịch khảo sát hiện trường sớm.
   const quotationOrderOption = prefillQuotation
@@ -134,7 +138,7 @@ function AdminPlanningPageContent() {
 
   const [selectedPlanDetail, setSelectedPlanDetail] = useState<SchedulePlan | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(() => Boolean(prefillOrderId || prefillQuotationId));
-  const [editingPlan, setEditingPlan] = useState<SchedulePlan | null>(null);
+  const [editingPlan, setEditingPlan] = useState<SchedulePlan | null>(() => existingPlanForQuotation ?? null);
   const [formSessionId, setFormSessionId] = useState(0);
   const [deletingPlan, setDeletingPlan] = useState<SchedulePlan | null>(null);
 

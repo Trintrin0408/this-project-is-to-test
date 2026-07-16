@@ -197,13 +197,13 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
   **Nguyên nhân**: `src/app/auth/login/page.tsx` có `useEffect` tự động điều hướng sang dashboard nếu phát hiện đã có phiên đăng nhập lưu trong `localStorage` (từ lần đăng nhập trước) — mở lại `/` hoặc `/auth/login` sẽ tự nhảy thẳng vào Manager/Admin dashboard, không hiện form đăng nhập.
   **Đã sửa**: xóa hẳn `useEffect` auto-redirect đó — trang login giờ LUÔN hiện form, dù còn phiên cũ hay không, theo đúng yêu cầu. `ProtectedRoute.tsx` (chặn truy cập trang đã bảo vệ khi CHƯA đăng nhập) giữ nguyên, không liên quan.
   Đã kiểm tra: `npx tsc --noEmit` sạch; test Playwright — đăng nhập Manager xong, mở lại `/auth/login` và `/` đều hiện đúng form đăng nhập thay vì tự chuyển hướng. 0 lỗi console.
-- [X]  Đổi tên sao cho phù hợp
+- [ ]  Đổi tên sao cho phù hợp
 
   ![1784133641919](images/DEMO_CHECKLIST/1784133641919.png)
-- [X]  Chưa kế thừa dữ liệu (hiển thị ở lựa chọn đơn đặt hàng)
+- [ ]  Chưa kế thừa dữ liệu (hiển thị ở lựa chọn đơn đặt hàng)
 
   ![1784133674003](images/DEMO_CHECKLIST/1784133674003.png)
-- [X]  chưa cập nhật được trạng thái cọc
+- [ ]  chưa cập nhật được trạng thái cọc
   ![1784133724359](images/DEMO_CHECKLIST/1784133724359.png)
 - [X]  Search đc khách hàng
 
@@ -211,6 +211,7 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
 - [X]  thu gọn theo mục và có thể search
 
   ![1784133818568](images/DEMO_CHECKLIST/1784133818568.png)
+- [ ]  danh sách hạng mục thu gọn lại theo thanh lăn
 - [X]  khi phân công khảo sát xong phải button " quản lí kế hoạch khảo sát " chuyển thành " đổi lịch phân công" và update kế hoạch lên màn hình
   ![1784134012532](images/DEMO_CHECKLIST/1784134012532.png)
 - [X]  xóa phần dự kiến
@@ -244,15 +245,19 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
   Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin, **điều hướng bằng click thật trong app** — không dùng `page.goto()` giữa các bước vì phát hiện `MOCK_POLICIES` là mảng in-memory thuần như `schedulePlans.ts`, reload cứng sẽ mất thay đổi vừa sửa, không phải lỗi của tính năng) — mở báo giá `bg-1` thấy đúng 4 chính sách thật (3 mốc hoàn cọc + tỉ lệ cọc chuẩn) kèm ngày hết hạn thật; sang `/admin/policies` sửa "Tỉ lệ đặt cọc tiêu chuẩn" từ 50% → 60% → quay lại đúng báo giá `bg-1` bằng điều hướng trong app → **giá trị trên báo giá cập nhật ngay thành 60%**, chứng minh liên kết dữ liệu thật (không phải 2 nguồn tách rời). Đối chiếu thêm phía Manager (`manager/quotations/bg-1`) hiển thị đúng. 0 lỗi console.
 
   ![1784140800106](images/DEMO_CHECKLIST/1784140800106.png)
+- [ ]  xóa tiến độ sắp xếp kho vật tư. Ở mỗi đầu việc sẽ update giờ bắt đầu làm, giờ hoàn thành thực tế theo leader staff cập nhật
+
+  ![1784170593002](images/DEMO_CHECKLIST/1784170593002.png)
 - [X]  Liên kết dữ liệu với mock data, khi click vào thì ra màn của nội dung đấy
 
   ![1784140587206](images/DEMO_CHECKLIST/1784140587206.png)
   **Nguyên nhân**: 4 thẻ KPI ở "Tổng quan" Admin (Doanh thu tháng/Đơn đặt mới/Báo giá chờ duyệt/Khách hàng mới) đã tính đúng số liệu thật từ mock data, nhưng thẻ chỉ là `<div>` tĩnh — bấm vào không có phản ứng gì, không dẫn tới màn danh sách tương ứng.
   **Đã sửa**: thêm field `href?: string` vào `KpiCardItem` (`src/components/reports/DashboardStats.tsx`, component KPI dùng chung toàn site) — có `href` thì thẻ tự bọc trong `<Link>` (bấm được, có hover shadow), không có thì giữ nguyên `<div>` tĩnh như cũ (không phá vỡ các nơi khác đang dùng component này mà chưa cần link, vd trang Pick-list xuất kho). Gắn `href` cho từng thẻ:
+
   - Admin (`admin/dashboard/page.tsx`): Doanh thu tháng → `/admin/reports/revenue`, Đơn đặt mới → `/admin/orders_audit`, Báo giá chờ duyệt → `/admin/quotations`, Khách hàng mới → `/admin/customers`.
   - Manager (`manager/dashboard/page.tsx`, cùng component dùng chung nên sửa luôn cho nhất quán): Đơn đang xử lý → `/manager/orders`, Việc cần làm hôm nay → `/manager/schedule/tasks`, Cảnh báo tồn kho → `/manager/inventory/stock-check`. Riêng "Chờ xác nhận" **không gắn link** — danh sách chi tiết của đúng số liệu này đã hiện sẵn ngay bên dưới trên cùng trang (`PendingConfirmationsCard`), gắn thêm link ra trang khác sẽ dư thừa/gây nhầm.
-  File đã sửa: `src/components/reports/DashboardStats.tsx`, `src/app/admin/dashboard/page.tsx`, `src/app/manager/dashboard/page.tsx`.
-  Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin + Manager riêng biệt, không chỉ đọc code) — xác nhận cả 4 thẻ Admin và 3/4 thẻ Manager có đúng `href` như thiết kế; bấm thật vào thẻ "Đơn đặt mới" → điều hướng đúng sang `/admin/orders_audit`; xác nhận thẻ "Chờ xác nhận" bên Manager **không** phải link (đúng chủ đích). 0 lỗi console.
+    File đã sửa: `src/components/reports/DashboardStats.tsx`, `src/app/admin/dashboard/page.tsx`, `src/app/manager/dashboard/page.tsx`.
+    Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin + Manager riêng biệt, không chỉ đọc code) — xác nhận cả 4 thẻ Admin và 3/4 thẻ Manager có đúng `href` như thiết kế; bấm thật vào thẻ "Đơn đặt mới" → điều hướng đúng sang `/admin/orders_audit`; xác nhận thẻ "Chờ xác nhận" bên Manager **không** phải link (đúng chủ đích). 0 lỗi console.
 
 ---
 
