@@ -93,7 +93,7 @@ const ADMIN_NAV_SECTIONS: NavSection[] = [
     title: 'SẢN PHẨM, DỊCH VỤ & KHO',
     items: [
       { label: 'Danh mục sản phẩm & thiết bị', href: '/admin/catalog', icon: Package },
-     
+      { label: 'Chính sách nghiệp vụ', href: '/admin/policies', icon: Shield },
       {
         label: 'Vận hành kho',
         href: '/admin/inventory/stock-status',

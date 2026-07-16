@@ -26,7 +26,7 @@ import {
   deleteBusinessService,
   getBusinessServices,
   updateBusinessService,
-} from '@/mocks/businessServicesMock';
+} from '@/mocks/db/catalog';
 
 // Trang thuần giao diện — xem giải thích ở đầu src/mocks/businessServicesMock.ts.
 

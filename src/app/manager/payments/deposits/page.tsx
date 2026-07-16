@@ -90,12 +90,7 @@ export default function Page() {
     {
       key: 'depositAmount',
       label: 'Tiền đặt cọc',
-      render: (o) => (
-        <div>
-          <p className="font-bold text-slate-900">{formatCurrency(o.depositAmount)}</p>
-          {o.depositIsEstimated && <p className="text-xs font-medium text-amber-600">{o.depositEstimatedLabel}</p>}
-        </div>
-      ),
+      render: (o) => <span className="font-bold text-slate-900">{formatCurrency(o.depositAmount)}</span>,
     },
     {
       key: 'depositStatus',

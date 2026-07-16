@@ -51,9 +51,11 @@ import {
   updateAdminOrderItem,
   updateAdminOrderLiveChecklist,
 } from '@/mocks/db/orders';
+import { getApproachingEventsForOrder } from '@/mocks/db/approachingEvents';
+import { getUrgencyBadgeVariant } from '@/utils/eventDate';
 import { getAdminQuotationById } from '@/mocks/db/quotations';
 import { getAdminContracts } from '@/mocks/adminContractsMock';
-import { TASK_STATUS_META, confirmAdminScheduleTaskWithEvidence, getAdminSchedulePlans } from '@/mocks/db/schedulePlans';
+import { TASK_STATUS_META, confirmAdminScheduleTaskWithEvidence, getAdminSchedulePlans, startAdminScheduleTask } from '@/mocks/db/schedulePlans';
 
 // Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminOrdersMock.ts. Bố cục port từ
 // docs/components/Orders.tsx do người dùng cung cấp (stepper vòng đời + tab điều hướng bên trái) —
@@ -71,10 +73,10 @@ const TABS: { id: DetailTab; label: string; icon: typeof Activity }[] = [
 ];
 
 const LIFECYCLE_STEPS: { id: BookingStatus; label: string; desc: string }[] = [
-  { id: 'NEW', label: '1. Khởi tạo', desc: 'Lập đơn mới' },
-  { id: 'CONFIRMED', label: '2. Xác nhận', desc: 'Chốt hợp đồng' },
-  { id: 'IN_PROGRESS', label: '3. Chuẩn bị', desc: 'Vận hành kho' },
-  { id: 'COMPLETED', label: '4. Tổ chức', desc: 'Nghiệm thu' },
+  { id: 'NEW', label: '1. Khởi tạo', desc: 'Lập đơn & hợp đồng' },
+  { id: 'CONFIRMED', label: '2. Xác nhận', desc: 'Xác nhận đặt cọc' },
+  { id: 'IN_PROGRESS', label: '3. Thi công', desc: 'Vận hành & live show' },
+  { id: 'COMPLETED', label: '4. Hoàn tất', desc: 'Quyết toán & nghiệm thu' },
 ];
 const LIFECYCLE_ORDER: BookingStatus[] = ['NEW', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'];
 
@@ -202,7 +204,7 @@ export default function AdminOrderDetailPage() {
     refresh();
   };
 
-  const handleEditSubmit = (values: Omit<AdminOrderRow, 'orderId' | 'checklist' | 'status' | 'paymentStatus' | 'items' | 'liveChecklist' | 'disputeLogs'>) => {
+  const handleEditSubmit = (values: Omit<AdminOrderRow, 'orderId' | 'checklist' | 'status' | 'items' | 'liveChecklist' | 'disputeLogs'>) => {
     updateAdminOrder(row.orderId, values);
     refresh();
     setIsEditOpen(false);
@@ -273,6 +275,11 @@ export default function AdminOrderDetailPage() {
     setPendingEvidence({ planId, taskId, taskTitle, assignee, fileName: file.name, previewUrl });
   };
 
+  const handleStartTask = (planId: string, taskId: string) => {
+    startAdminScheduleTask(planId, taskId);
+    refresh();
+  };
+
   const handleCancelTaskEvidence = () => {
     if (pendingEvidence) URL.revokeObjectURL(pendingEvidence.previewUrl);
     setPendingEvidence(null);
@@ -304,6 +311,8 @@ export default function AdminOrderDetailPage() {
   const isAllPrepared = totalItemsCount > 0 && preparedItemsCount >= totalItemsCount;
   const remainingAmount = row.paymentStatus === 'PAID' ? 0 : Math.max(0, row.totalPrice - (row.paymentStatus === 'DEPOSITED' ? row.depositAmount : 0));
   const currentChecklist = row.liveChecklist;
+  const nearestApproachingEvent = getApproachingEventsForOrder(row.orderId, 7)[0];
+  const urgencyVariant = nearestApproachingEvent ? getUrgencyBadgeVariant(nearestApproachingEvent.daysLeft) : null;
 
   return (
     <div className="p-6">
@@ -322,6 +331,11 @@ export default function AdminOrderDetailPage() {
               <h1 className="text-2xl font-bold tracking-tight text-slate-900">{row.orderId}</h1>
               <Badge variant={BOOKING_STATUS_META[row.status].variant}>{BOOKING_STATUS_META[row.status].label}</Badge>
               <Badge variant={PAYMENT_STATUS_META[row.paymentStatus].variant}>{PAYMENT_STATUS_META[row.paymentStatus].label}</Badge>
+              {urgencyVariant && nearestApproachingEvent && (
+                <Badge variant={urgencyVariant}>
+                  {nearestApproachingEvent.label} · Còn {nearestApproachingEvent.daysLeft} ngày
+                </Badge>
+              )}
             </div>
             <p className="mt-1 text-sm font-semibold text-slate-950">{detail.eventName}</p>
           </div>
@@ -428,6 +442,13 @@ export default function AdminOrderDetailPage() {
                   </p>
                 </div>
                 <div className="space-y-1.5">
+                  <span className="block font-semibold uppercase text-slate-400">Ngày kết thúc</span>
+                  <p className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
+                    <Calendar className="h-4 w-4 text-slate-400" />
+                    {formatDate(row.weddingEndDate)}
+                  </p>
+                </div>
+                <div className="space-y-1.5">
                   <span className="block font-semibold uppercase text-slate-400">Khách mời dự kiến</span>
                   <p className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
                     <Users className="h-4 w-4 text-slate-400" />
@@ -510,7 +531,7 @@ export default function AdminOrderDetailPage() {
                   <span className="font-mono text-lg font-extrabold">
                     {(() => {
                       let n = 1;
-                      if (row.paymentStatus === 'DEPOSITED' || row.paymentStatus === 'PAID') n++;
+                      if ((row.paymentStatus === 'DEPOSITED' || row.paymentStatus === 'PAID') && row.surveyAssignment) n++;
                       if (row.status === 'IN_PROGRESS' || row.status === 'COMPLETED') n++;
                       if (row.status === 'COMPLETED') n++;
                       if (row.status === 'COMPLETED' && row.paymentStatus === 'PAID') n++;
@@ -557,28 +578,35 @@ export default function AdminOrderDetailPage() {
                   </div>
                 </div>
 
-                {/* Mốc 2: Cọc */}
+                {/* Mốc 2: Cọc & Khảo sát — phải xác nhận đủ 2 việc mới coi là hoàn thành mốc này */}
                 {(() => {
                   const isDeposited = row.paymentStatus === 'DEPOSITED' || row.paymentStatus === 'PAID';
+                  const isSurveyed = Boolean(row.surveyAssignment);
+                  const isMilestone2Done = isDeposited && isSurveyed;
                   return (
                     <div className="relative pl-10">
                       <div
                         className={`absolute left-3 top-0.5 flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold ${
-                          isDeposited ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-amber-400 bg-amber-50 text-amber-600'
+                          isMilestone2Done ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-amber-400 bg-amber-50 text-amber-600'
                         }`}
                       >
-                        {isDeposited ? '✓' : '2'}
+                        {isMilestone2Done ? '✓' : '2'}
                       </div>
                       <div className="space-y-2 text-xs">
                         <div className="flex items-center gap-2">
-                          <h5 className="text-sm font-extrabold text-slate-900">Mốc 2: Thu tiền tạm ứng đặt cọc 50%</h5>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${isDeposited ? 'border border-emerald-100 bg-emerald-50 text-emerald-700' : 'border border-amber-100 bg-amber-50 text-amber-700'}`}>
-                            {isDeposited ? 'Hoàn thành' : 'Chưa bắt đầu'}
+                          <h5 className="text-sm font-extrabold text-slate-900">Mốc 2: Xác nhận cọc & khảo sát hiện trường</h5>
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${isMilestone2Done ? 'border border-emerald-100 bg-emerald-50 text-emerald-700' : 'border border-amber-100 bg-amber-50 text-amber-700'}`}>
+                            {isMilestone2Done ? 'Hoàn thành' : 'Chưa bắt đầu'}
                           </span>
                         </div>
-                        <p className="text-slate-500">Thu cọc 50% là điều kiện bắt buộc để kho duyệt xếp thiết bị và khóa chỗ các dòng thiết bị công suất lớn.</p>
+                        <p className="text-slate-500">Cần xác nhận đủ 2 việc — thu cọc 50% và hoàn tất khảo sát hiện trường — trước khi chuyển sang chuẩn bị kho.</p>
+
                         <div className="rounded-lg border bg-slate-50 p-3.5">
-                          <p className="text-slate-700">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                            {isDeposited ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <span className="h-3 w-3 rounded-full border-2 border-amber-400" />}
+                            Thu tiền tạm ứng đặt cọc 50%
+                          </div>
+                          <p className="mt-1.5 text-slate-700">
                             Khoản tiền cọc dự kiến: <strong className="text-blue-600">{formatCurrency(row.depositAmount)}</strong>
                           </p>
                           {!isDeposited && (
@@ -587,6 +615,25 @@ export default function AdminOrderDetailPage() {
                               className="mt-2.5 rounded bg-emerald-600 px-3 py-1.5 text-[10px] font-bold text-white shadow-sm transition hover:bg-emerald-700"
                             >
                               Xác nhận đã nhận cọc 50%
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="rounded-lg border bg-slate-50 p-3.5">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                            {isSurveyed ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <span className="h-3 w-3 rounded-full border-2 border-amber-400" />}
+                            Khảo sát hiện trường
+                          </div>
+                          {isSurveyed && row.surveyAssignment ? (
+                            <p className="mt-1.5 text-slate-700">
+                              Người khảo sát: <strong className="text-slate-900">{row.surveyAssignment.assigneeName}</strong> — {formatDate(row.surveyAssignment.date)} · {row.surveyAssignment.time}
+                            </p>
+                          ) : (
+                            <button
+                              onClick={handleOpenSurveyModal}
+                              className="mt-2.5 rounded bg-emerald-600 px-3 py-1.5 text-[10px] font-bold text-white shadow-sm transition hover:bg-emerald-700"
+                            >
+                              Xác nhận đã khảo sát
                             </button>
                           )}
                         </div>
@@ -909,6 +956,21 @@ export default function AdminOrderDetailPage() {
                     </div>
                   </div>
 
+                  <div className="rounded-lg border bg-slate-50 p-3 text-xs">
+                    <div className="flex items-center justify-between font-bold text-slate-800">
+                      <span>Tiến độ sắp xếp kho vật tư:</span>
+                      <span className={isAllPrepared ? 'text-emerald-600' : 'text-amber-600'}>
+                        {preparedItemsCount} / {totalItemsCount} thiết bị ({isAllPrepared ? 'Sẵn sàng xếp xe' : 'Đang xếp kho'})
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={`h-1.5 rounded-full ${isAllPrepared ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                        style={{ width: `${totalItemsCount > 0 ? (preparedItemsCount / totalItemsCount) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <p className="mb-2 text-xs font-bold text-slate-700">Công việc kỹ thuật ({linkedPlan.tasks.length})</p>
                     {linkedPlan.tasks.length === 0 ? (
@@ -925,8 +987,15 @@ export default function AdminOrderDetailPage() {
                               <div>
                                 <p className="font-bold text-slate-800">{task.title}</p>
                                 <p className="mt-0.5 text-[10px] text-slate-500">
-                                  Phụ trách: {task.assignee} · {task.startTime}
+                                  Phụ trách: {task.assignee} · Dự kiến: {task.startTime}
                                 </p>
+                                {(task.actualStartTime || task.actualEndTime) && (
+                                  <p className="mt-0.5 text-[10px] font-semibold text-slate-600">
+                                    {task.actualStartTime && <>Bắt đầu lúc: {task.actualStartTime}</>}
+                                    {task.actualStartTime && task.actualEndTime && ' · '}
+                                    {task.actualEndTime && <>Hoàn thành lúc: {task.actualEndTime}</>}
+                                  </p>
+                                )}
                                 {task.evidencePhotoName && (
                                   <p className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-emerald-600">
                                     <Camera className="h-3 w-3" />
@@ -939,6 +1008,15 @@ export default function AdminOrderDetailPage() {
                               <span className={`w-fit rounded-full px-2 py-0.5 text-[10px] font-bold ${TASK_STATUS_META[task.status].badgeClass}`}>
                                 {TASK_STATUS_META[task.status].label}
                               </span>
+                              {(task.status === 'TODO' || task.status === 'ASSIGNED') && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartTask(linkedPlan.id, task.id)}
+                                  className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-700 transition hover:bg-amber-100"
+                                >
+                                  Bắt đầu làm việc
+                                </button>
+                              )}
                               <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100">
                                 <Camera className="h-3.5 w-3.5" />
                                 {task.evidencePhotoUrl ? 'Thay ảnh' : 'Tải ảnh thi công'}

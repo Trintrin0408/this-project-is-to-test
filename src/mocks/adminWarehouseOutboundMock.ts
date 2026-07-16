@@ -1,10 +1,20 @@
 import type { BadgeVariant } from '@/components/ui/Badge';
 import { adjustAdminEquipmentStock, getAdminEquipmentById } from '@/mocks/db/catalog';
+import { getAdminOrders } from '@/mocks/db/orders';
+import { FIELD_OPS_STAFF } from '@/mocks/db/employees';
 
 // Trang /admin/inventory/outbound ("Xuất kho") hiện code THUẦN GIAO DIỆN theo mục 0 CLAUDE.md, port từ
 // docs/components/WarehouseOutView.tsx. Khi xác nhận xuất kho, store này gọi sang
 // adminEquipmentMock.adjustAdminEquipmentStock để trừ tồn kho thật trong phiên làm việc, giữ số liệu
 // khớp với trang "Gói sản phẩm & dịch vụ" và "Tồn kho doanh nghiệp".
+//
+// Task "System Testing" audit 2b-3: trước đây `bookingName` là chuỗi tự do tự bịa (vd "Tiệc cưới Minh
+// Tuấn & Hồng Nhung"), không có field nào trỏ đơn thật; `receiver` cũng lấy tên từ pool riêng không
+// liên quan `db/employees.ts`. Đã sửa: thêm `orderId` trỏ THẬT vào `db/orders.ts` (10 đơn
+// CONFIRMED/IN_PROGRESS đầu tiên), `bookingName` giờ derive từ `customerName` của đơn đó thay vì tự
+// sinh độc lập; `receiver` lấy từ `FIELD_OPS_STAFF` (Task 18, pool nhân sự dùng chung) thay vì
+// `OUTBOUND_RECEIVER_OPTIONS` riêng (đã xóa — chưa từng được dùng thật, các giá trị receiver trước đây
+// gõ tay trực tiếp không qua mảng này).
 
 export type OutboundStatus = 'exported' | 'not_exported';
 
@@ -23,6 +33,7 @@ export interface OutboundVoucherItem {
 
 export interface OutboundVoucher {
   id: string; // PX0001
+  orderId: string; // trỏ thật vào db/orders.ts
   bookingName: string;
   expectedDate: string; // YYYY-MM-DD
   actualDate: string; // YYYY-MM-DD HH:mm hoặc rỗng nếu chưa xuất
@@ -32,8 +43,6 @@ export interface OutboundVoucher {
   notes: string;
   items: OutboundVoucherItem[];
 }
-
-export const OUTBOUND_RECEIVER_OPTIONS = ['Vũ Hoàng Long', 'Nguyễn Minh Quân', 'Mai Thị Hạnh', 'Bùi Thanh Hương'];
 
 function addDays(base: Date, days: number): string {
   const d = new Date(base);
@@ -48,17 +57,24 @@ function buildItems(pairs: [string, number, string?][]): OutboundVoucherItem[] {
   });
 }
 
+type OutboundVoucherSeedRow = Omit<OutboundVoucher, 'items' | 'orderId' | 'bookingName' | 'receiver'> & {
+  itemPairs: [string, number, string?][];
+  orderIndex: number;
+  receiverIndex: number;
+};
+
 function generateMockVouchers(): OutboundVoucher[] {
   const today = new Date('2026-07-12');
+  const eligibleOrders = getAdminOrders().filter((o) => o.status === 'CONFIRMED' || o.status === 'IN_PROGRESS');
 
-  const rows: Array<Omit<OutboundVoucher, 'items'> & { itemPairs: [string, number, string?][] }> = [
+  const rows: OutboundVoucherSeedRow[] = [
     {
       id: 'PX0001',
-      bookingName: 'Tiệc cưới Minh Tuấn & Hồng Nhung',
+      orderIndex: 0,
       expectedDate: addDays(today, -3),
       actualDate: `${addDays(today, -3)} 08:30`,
       status: 'exported',
-      receiver: 'Vũ Hoàng Long',
+      receiverIndex: 0,
       truckNumber: '29C-123.45',
       notes: 'Bàn giao đầy đủ thiết bị trang trí và bàn ghế cho sảnh Hera.',
       itemPairs: [
@@ -70,11 +86,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0002',
-      bookingName: 'Lễ thành hôn Quốc Bảo & Mỹ Duyên',
+      orderIndex: 1,
       expectedDate: addDays(today, -2),
       actualDate: `${addDays(today, -2)} 10:15`,
       status: 'exported',
-      receiver: 'Nguyễn Minh Quân',
+      receiverIndex: 1,
       truckNumber: '51C-789.12',
       notes: 'Lắp đặt bàn ghế tiệc cưới sảnh Zeus.',
       itemPairs: [
@@ -84,11 +100,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0003',
-      bookingName: 'Tiệc cưới Thế Vinh & Khánh Vy',
+      orderIndex: 2,
       expectedDate: addDays(today, -1),
       actualDate: `${addDays(today, -1)} 09:05`,
       status: 'exported',
-      receiver: 'Mai Thị Hạnh',
+      receiverIndex: 2,
       truckNumber: '29C-445.67',
       notes: 'Bàn ghế và khăn trải bàn cổng cưới sảnh Artemis.',
       itemPairs: [
@@ -98,11 +114,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0004',
-      bookingName: 'Lễ vu quy Hoài Nam & Thùy Chi',
+      orderIndex: 3,
       expectedDate: addDays(today, 1),
       actualDate: '',
       status: 'not_exported',
-      receiver: 'Vũ Hoàng Long',
+      receiverIndex: 0,
       truckNumber: '29C-332.11',
       notes: 'Thiết bị phụ trợ chụp hình và quay phim ngoài trời sảnh Aphrodite.',
       itemPairs: [
@@ -112,11 +128,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0005',
-      bookingName: 'Tiệc cưới Văn Lâm & Quỳnh Anh',
+      orderIndex: 4,
       expectedDate: addDays(today, -1),
       actualDate: `${addDays(today, -1)} 14:20`,
       status: 'exported',
-      receiver: 'Bùi Thanh Hương',
+      receiverIndex: 3,
       truckNumber: '30F-982.55',
       notes: '',
       itemPairs: [
@@ -126,11 +142,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0006',
-      bookingName: 'Tiệc cưới Tiến Đạt & Minh Khuê',
+      orderIndex: 5,
       expectedDate: addDays(today, 2),
       actualDate: '',
       status: 'not_exported',
-      receiver: 'Nguyễn Minh Quân',
+      receiverIndex: 1,
       truckNumber: '29C-123.45',
       notes: '',
       itemPairs: [
@@ -140,11 +156,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0007',
-      bookingName: 'Lễ thành hôn Đức Huy & Trà My',
+      orderIndex: 6,
       expectedDate: addDays(today, -2),
       actualDate: `${addDays(today, -2)} 07:45`,
       status: 'exported',
-      receiver: 'Vũ Hoàng Long',
+      receiverIndex: 0,
       truckNumber: '29H-456.78',
       notes: '',
       itemPairs: [
@@ -154,11 +170,11 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0008',
-      bookingName: 'Tiệc cưới Xuân Trường & Thảo Nguyên',
+      orderIndex: 7,
       expectedDate: addDays(today, 3),
       actualDate: '',
       status: 'not_exported',
-      receiver: 'Mai Thị Hạnh',
+      receiverIndex: 2,
       truckNumber: '29C-223.11',
       notes: '',
       itemPairs: [
@@ -168,13 +184,13 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0009',
-      bookingName: 'Đám cưới Minh Anh & Thu Hà',
+      orderIndex: 8,
       expectedDate: addDays(today, 0),
       actualDate: '',
       status: 'not_exported',
-      receiver: 'Bùi Thanh Hương',
+      receiverIndex: 3,
       truckNumber: '29C-888.88',
-      notes: 'Bàn giao thiết bị đám cưới Minh Anh & Thu Hà sảnh Hoàng Gia.',
+      notes: 'Bàn giao thiết bị theo đúng hạng mục đã chốt trong báo giá.',
       itemPairs: [
         ['BG005', 100, 'Theo bàn tiệc'],
         ['BG001', 10, 'Theo bàn tiệc'],
@@ -184,18 +200,29 @@ function generateMockVouchers(): OutboundVoucher[] {
     },
     {
       id: 'PX0010',
-      bookingName: 'Lễ thành hôn Duy Mạnh & Quỳnh Anh',
+      orderIndex: 9,
       expectedDate: addDays(today, 5),
       actualDate: '',
       status: 'not_exported',
-      receiver: 'Nguyễn Minh Quân',
+      receiverIndex: 1,
       truckNumber: '30F-122.34',
       notes: '',
       itemPairs: [['BG003', 180]],
     },
   ];
 
-  return rows.map((row) => ({ ...row, items: buildItems(row.itemPairs) }));
+  return rows.map((row) => {
+    const { orderIndex, receiverIndex, itemPairs, ...rest } = row;
+    const order = eligibleOrders[orderIndex % eligibleOrders.length];
+    const receiver = FIELD_OPS_STAFF[receiverIndex % FIELD_OPS_STAFF.length].name;
+    return {
+      ...rest,
+      orderId: order.orderId,
+      bookingName: `Lễ cưới ${order.customerName}`,
+      receiver,
+      items: buildItems(itemPairs),
+    };
+  });
 }
 
 let store: OutboundVoucher[] = generateMockVouchers();

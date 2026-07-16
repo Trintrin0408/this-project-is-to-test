@@ -81,12 +81,11 @@ export default function AdminOrdersPage() {
     setCoordinatorFilter('ALL');
   };
 
-  const handleCreate = (values: Omit<AdminOrderRow, 'orderId' | 'checklist' | 'status' | 'paymentStatus' | 'items' | 'liveChecklist' | 'disputeLogs'>) => {
+  const handleCreate = (values: Omit<AdminOrderRow, 'orderId' | 'checklist' | 'status' | 'items' | 'liveChecklist' | 'disputeLogs'>) => {
     const orderId = nextAdminOrderId();
     addAdminOrder({
       orderId,
       status: 'NEW',
-      paymentStatus: 'UNPAID',
       checklist: [],
       items: buildOrderItems(orderId, values.totalPrice, values.venue, 'NEW'),
       liveChecklist: {},

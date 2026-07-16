@@ -1,5 +1,6 @@
 import type { BadgeVariant } from '@/components/ui/Badge';
 import { getAdminQuotationById, getAdminQuotationDetail, getAdminQuotations } from '@/mocks/db/quotations';
+import { COORDINATOR_POOL } from '@/mocks/db/employees';
 
 // Trang /admin/contracts (Hợp đồng) hiện code THUẦN GIAO DIỆN theo mục 0 CLAUDE.md, port từ
 // docs/components/ContractsView.tsx + ContractDetailView.tsx. Không có model "Contract" thật nào
@@ -103,7 +104,10 @@ export interface AdminContract {
   timeline: ContractTimelineStep[];
 }
 
-export const CONTRACT_COORDINATOR_OPTIONS = ['Vũ Hoàng Long', 'Lê Minh Dũng', 'Nguyễn Thị Hương'];
+/** Điều phối viên phụ trách hợp đồng — lấy từ pool nhân sự dùng chung (Task 18, `db/employees.ts`)
+ * thay vì tự khai 3 tên độc lập như trước. Giữ đúng 3/5 người đầu (giống thành phần cũ) để không đổi
+ * coordinator của các hợp đồng đã seed sẵn. */
+export const CONTRACT_COORDINATOR_OPTIONS: string[] = COORDINATOR_POOL.slice(0, 3);
 
 const VENUE_POOL = ['Sảnh Hera', 'Sảnh Artemis', 'Sảnh Zeus', 'Sảnh Aphrodite'];
 

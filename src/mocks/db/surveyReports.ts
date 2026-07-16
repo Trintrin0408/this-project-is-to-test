@@ -73,7 +73,7 @@ export const SURVEY_TARGET_ORDERS = getAdminOrders()
     id: o.orderId,
     customerName: o.customerName,
     eventName: `Lễ cưới ${o.customerName}`,
-    location: `Riverside Palace (${o.venue})`,
+    location: o.venue,
   }));
 
 const IMAGE_POOL = [

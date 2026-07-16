@@ -204,7 +204,7 @@ function QuotationFormContent() {
       return;
     }
 
-    const today = new Date('2026-07-10');
+    const today = new Date();
     const quotationId = `bg-${Date.now()}`;
     addAdminQuotation({
       quotationId,

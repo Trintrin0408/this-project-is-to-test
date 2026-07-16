@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, SubmitEvent } from 'react';
+import { useState, SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -10,17 +10,17 @@ import { ROLE_DASHBOARD_PATH } from '@/constants/roles';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: isAuthLoading, login } = useAuth();
+  const { login } = useAuth();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (isAuthLoading || !isAuthenticated || !user) return;
-    router.replace(ROLE_DASHBOARD_PATH[user.role.roleName] ?? '/auth/login');
-  }, [isAuthLoading, isAuthenticated, user, router]);
+  // Cố ý KHÔNG tự động điều hướng sang dashboard dù đã có phiên đăng nhập lưu sẵn trong localStorage
+  // (khác quy ước thường thấy) — theo yêu cầu người dùng: trang này luôn phải hiện form đăng nhập mỗi
+  // khi được mở, không tự nhảy thẳng vào Admin/Manager dashboard chỉ vì còn phiên cũ từ lần trước.
+  // Việc chặn truy cập trang đã bảo vệ khi CHƯA đăng nhập vẫn do ProtectedRoute.tsx đảm nhiệm riêng.
 
   // ⚠️ Đăng nhập tạm KHÔNG gọi backend thật — Aiven cloud DB hiện lệch schema so với
   // `prisma/schema.prisma` nên `POST /auth/login` luôn trả 400 DB_ERROR (docs/more-require.md mục

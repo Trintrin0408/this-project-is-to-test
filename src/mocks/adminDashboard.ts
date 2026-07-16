@@ -1,6 +1,6 @@
 import type { RevenueReportPoint } from '@/types/report';
 import type { OrderStatus } from '@/types/order';
-import { getAdminOrders } from '@/mocks/db/orders';
+import { getAdminOrders, REFERENCE_TODAY } from '@/mocks/db/orders';
 import { getAdminQuotations } from '@/mocks/db/quotations';
 import { getOrderPaymentViews, type OrderPaymentView } from '@/mocks/db/payments';
 import { FIELD_OPS_STAFF } from '@/mocks/db/employees';
@@ -22,10 +22,9 @@ import { FIELD_OPS_STAFF } from '@/mocks/db/employees';
 // cách xác định khách "mới trong tháng" từ dữ liệu thật; các badge *Change (% so với tháng trước)
 // cũng vẫn tĩnh vì mock không lưu số liệu kỳ trước để tính chênh lệch thật.
 
-// "Hôm nay" cố định của toàn bộ hệ mock — PHẢI khớp giá trị `today` hardcode trong
-// `generateMockOrders()` (db/orders.ts) để mọi phép tính theo tháng/ngày ở đây nhất quán với ngày
-// tạo sinh dữ liệu đơn hàng/thanh toán, không dùng `new Date()` thật của trình duyệt.
-const REFERENCE_TODAY = '2026-07-10';
+// "Hôm nay" cố định của toàn bộ hệ mock — nhập từ db/orders.ts (nguồn duy nhất, khớp giá trị
+// `today` hardcode trong `generateMockOrders()`) để mọi phép tính theo tháng/ngày ở đây nhất quán
+// với ngày tạo sinh dữ liệu đơn hàng/thanh toán, không dùng `new Date()` thật của trình duyệt.
 const REFERENCE_MONTH_KEY = REFERENCE_TODAY.slice(0, 7); // "2026-07"
 
 function monthKeyOf(dateStr: string): string {

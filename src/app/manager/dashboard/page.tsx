@@ -30,6 +30,7 @@ export default function ManagerDashboardPage() {
       iconColor: 'blue',
       changeLabel: kpis.activeOrdersChange,
       changeDirection: 'up',
+      href: '/manager/orders',
     },
     {
       label: 'Chờ xác nhận',
@@ -38,6 +39,7 @@ export default function ManagerDashboardPage() {
       iconColor: 'amber',
       changeLabel: kpis.pendingConfirmationsChange,
       changeDirection: 'up',
+      // Không link ra màn riêng — danh sách chi tiết đã hiện ngay bên dưới trên cùng trang này (PendingConfirmationsCard).
     },
     {
       label: 'Việc cần làm hôm nay',
@@ -46,6 +48,7 @@ export default function ManagerDashboardPage() {
       iconColor: 'green',
       changeLabel: kpis.tasksTodayChange,
       changeDirection: 'up',
+      href: '/manager/schedule/tasks',
     },
     {
       label: 'Cảnh báo tồn kho',
@@ -54,6 +57,7 @@ export default function ManagerDashboardPage() {
       iconColor: 'red',
       changeLabel: kpis.inventoryAlertsChange,
       changeDirection: 'down',
+      href: '/manager/inventory/stock-check',
     },
   ];
 

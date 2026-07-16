@@ -13,6 +13,7 @@ import Reveal from '@/components/ui/Reveal';
 import {
   CreateReturnSlipItemInput,
   createReturnSlip,
+  getEligibleOrdersForReturn,
   getReturnSlips,
   RETURN_SLIP_STATUS_META,
   ReturnSlip,
@@ -67,7 +68,9 @@ export default function Page() {
       label: 'Đơn đặt cưới',
       render: (slip) => (
         <div>
-          <p className="font-semibold text-slate-800">{slip.orderCode}</p>
+          <Link href={`/manager/orders/${slip.orderCode}`} className="font-semibold text-blue-600 hover:underline">
+            {slip.orderCode}
+          </Link>
           <p className="text-xs text-slate-400">{slip.orderName}</p>
         </div>
       ),
@@ -169,17 +172,14 @@ interface CreateReturnSlipModalProps {
 }
 
 function CreateReturnSlipModal({ isOpen, onClose, onCreated }: Readonly<CreateReturnSlipModalProps>) {
-  const [orderCode, setOrderCode] = useState('');
-  const [orderName, setOrderName] = useState('');
-  const [customerName, setCustomerName] = useState('');
+  const eligibleOrders = useMemo(() => getEligibleOrdersForReturn(), []);
+  const [orderId, setOrderId] = useState('');
   const [createdBy, setCreatedBy] = useState('');
   const [items, setItems] = useState<CreateReturnSlipItemInput[]>([{ ...EMPTY_ITEM }]);
   const [error, setError] = useState('');
 
   const resetAndClose = () => {
-    setOrderCode('');
-    setOrderName('');
-    setCustomerName('');
+    setOrderId('');
     setCreatedBy('');
     setItems([{ ...EMPTY_ITEM }]);
     setError('');
@@ -194,8 +194,8 @@ function CreateReturnSlipModal({ isOpen, onClose, onCreated }: Readonly<CreateRe
   const removeItemRow = (index: number) => setItems((prev) => prev.filter((_, i) => i !== index));
 
   const handleSubmit = () => {
-    if (!orderCode.trim() || !orderName.trim() || !customerName.trim() || !createdBy.trim()) {
-      setError('Vui lòng nhập đủ thông tin đơn đặt và người tạo phiếu');
+    if (!orderId || !createdBy.trim()) {
+      setError('Vui lòng chọn đơn đặt cưới và nhập người tạo phiếu');
       return;
     }
     const validItems = items.filter((item) => item.itemName.trim() && item.totalToReturn > 0);
@@ -203,7 +203,7 @@ function CreateReturnSlipModal({ isOpen, onClose, onCreated }: Readonly<CreateRe
       setError('Vui lòng thêm ít nhất 1 thiết bị cần hoàn kho với số lượng lớn hơn 0');
       return;
     }
-    const slip = createReturnSlip({ orderCode: orderCode.trim(), orderName: orderName.trim(), customerName: customerName.trim(), createdBy: createdBy.trim(), items: validItems });
+    const slip = createReturnSlip({ orderId, createdBy: createdBy.trim(), items: validItems });
     onCreated(slip);
   };
 
@@ -224,12 +224,15 @@ function CreateReturnSlipModal({ isOpen, onClose, onCreated }: Readonly<CreateRe
     >
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input label="Mã đơn đặt cưới" required value={orderCode} onChange={(e) => setOrderCode(e.target.value)} placeholder="VD: ĐC-2026-0520" />
+          <Select
+            label="Đơn đặt cưới (đã thi công/hoàn thành)"
+            required
+            value={orderId}
+            onChange={(e) => setOrderId(e.target.value)}
+            options={eligibleOrders.map((o) => ({ value: o.orderId, label: `${o.orderId} — ${o.customerName}` }))}
+            placeholder="-- Chọn đơn --"
+          />
           <Input label="Người tạo phiếu" required value={createdBy} onChange={(e) => setCreatedBy(e.target.value)} placeholder="Họ và tên" />
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input label="Tên sự kiện" required value={orderName} onChange={(e) => setOrderName(e.target.value)} placeholder="VD: Đám cưới Minh & Hà" />
-          <Input label="Khách hàng" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="VD: Minh & Hà" />
         </div>
 
         <div>

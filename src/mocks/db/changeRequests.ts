@@ -57,7 +57,7 @@ function generateHandovers(): FieldHandoverRecord[] {
       type,
       submittedBy: LEADER_STAFF_POOL[index % LEADER_STAFF_POOL.length],
       submittedAt: order.weddingDate,
-      location: `Riverside Palace (${order.venue})`,
+      location: order.venue,
       notes:
         type === 'HANDOVER'
           ? 'Đã bàn giao đầy đủ thiết bị theo hạng mục báo giá, khách hàng kiểm tra và đồng ý bằng lời.'

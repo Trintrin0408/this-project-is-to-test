@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AnimatePresence } from 'framer-motion';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Edit, Eye, FileText, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
+import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Edit, Eye, FileText, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
@@ -22,6 +22,8 @@ import {
   saveAdminSchedulePlan,
 } from '@/mocks/db/schedulePlans';
 import { getAdminQuotationById } from '@/mocks/db/quotations';
+import { getApproachingEvents } from '@/mocks/db/approachingEvents';
+import { getEventUrgency } from '@/utils/eventDate';
 
 // Bản mirror 1:1 của src/app/admin/coordination/planning/page.tsx dưới path /manager/schedule/plans
 // — xem giải thích nghiệp vụ ở đầu src/mocks/adminSchedulePlansMock.ts. Chỉ giữ 2 view (Lịch điều
@@ -88,6 +90,22 @@ function ManagerPlanningPageContent() {
 
   const [plans, setPlans] = useState<SchedulePlan[]>(() => getAdminSchedulePlans());
   const [activeTab, setActiveTab] = useState<'calendar' | 'timeline' | 'list'>('calendar');
+
+  const approachingEventsByOrderId = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof getApproachingEvents>>();
+    for (const event of getApproachingEvents(7)) {
+      map.set(event.orderId, [...(map.get(event.orderId) ?? []), event]);
+    }
+    return map;
+  }, []);
+  const approachingPlans = useMemo(
+    () => plans.filter((p) => approachingEventsByOrderId.has(p.orderId)),
+    [plans, approachingEventsByOrderId],
+  );
+  const approachingUrgentCount = approachingPlans.filter((p) =>
+    approachingEventsByOrderId.get(p.orderId)!.some((event) => getEventUrgency(event.daysLeft) === 'urgent'),
+  ).length;
+  const approachingSoonCount = approachingPlans.length - approachingUrgentCount;
 
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
@@ -255,6 +273,26 @@ function ManagerPlanningPageContent() {
           </Button>
         </div>
       </div>
+
+      {approachingPlans.length > 0 && (
+        <div
+          className={`mt-4 flex items-start gap-2.5 rounded-xl border p-3.5 text-xs ${
+            approachingUrgentCount > 0 ? 'border-red-200 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-700'
+          }`}
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            Có <strong>{approachingPlans.length}</strong> kế hoạch có mốc thời gian (tổ chức/khảo sát/lắp đặt/thu hồi) sắp diễn ra trong 7 ngày tới
+            {approachingUrgentCount > 0 && (
+              <>
+                {' '}
+                — <strong>{approachingUrgentCount} khẩn cấp</strong> (còn ≤3 ngày)
+              </>
+            )}
+            {approachingSoonCount > 0 && <>, {approachingSoonCount} sắp tới (4-7 ngày)</>}.
+          </p>
+        </div>
+      )}
 
       {activeTab === 'list' && (
         <Reveal className="mt-6 flex flex-col gap-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-2xs md:flex-row md:items-center md:justify-between">

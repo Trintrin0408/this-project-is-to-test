@@ -152,8 +152,8 @@
   1. Order → Customer → Order (đúng yêu cầu trọng tâm của Task 24): mở `/manager/orders/DD0001` → đọc tên khách từ tiêu đề sự kiện "Lễ cưới Nguyễn Minh Trí" → sang `/manager/customers` tìm đúng dòng "Nguyễn Minh Trí" → mở `/manager/customers/KH001` → xác nhận mã đơn `DD0001` xuất hiện trong danh sách đơn hàng của khách này (`true`) — chứng minh quan hệ 2 chiều Order↔Customer vẫn đúng sau toàn bộ Task 12-23.
   2. Order ↔ Payments: `/manager/payments/deposits/DD0001` hiển thị đúng tên khách "Nguyễn Minh Trí" khớp với đơn `DD0001` (`true`) — xác nhận `db/payments.ts` (Task 19) vẫn nối đúng `orderId` thật.
   3. Quotation ↔ Contract: `/admin/quotations/bg-1` và `/admin/contracts/HD2507-001` cùng hiển thị "Nguyễn Minh Trí" (`true`, `true`) — xác nhận lại bản sửa ở Task 22 vẫn đứng vững sau khi Task 23 chạy (không có regression).
-  **Bug thật phát hiện + đã sửa trong lúc chuẩn bị test**: kịch bản đầu tiên dùng selector chung `a[href^="/admin/orders_audit/"]` để tự động lấy 1 link chi tiết đơn từ trang danh sách `/admin/orders_audit` — vô tình khớp nhầm link sidebar điều hướng tới `/admin/orders_audit/payments` (route tĩnh) thay vì 1 dòng đơn hàng thật, khiến `/admin/orders_audit/[id]` chưa từng được crawl thật trong lần chạy đầu. Đây là lỗi ở kịch bản test (selector không đủ đặc hiệu), không phải lỗi ứng dụng — đã sửa bằng cách lọc bỏ href chứa `/payments` trước khi chọn, xác nhận lại `/admin/orders_audit/DD0001` (0 lỗi console).
-  Không sửa file nguồn nào trong task này (thuần kiểm thử). `npx tsc --noEmit` vẫn sạch.
+     **Bug thật phát hiện + đã sửa trong lúc chuẩn bị test**: kịch bản đầu tiên dùng selector chung `a[href^="/admin/orders_audit/"]` để tự động lấy 1 link chi tiết đơn từ trang danh sách `/admin/orders_audit` — vô tình khớp nhầm link sidebar điều hướng tới `/admin/orders_audit/payments` (route tĩnh) thay vì 1 dòng đơn hàng thật, khiến `/admin/orders_audit/[id]` chưa từng được crawl thật trong lần chạy đầu. Đây là lỗi ở kịch bản test (selector không đủ đặc hiệu), không phải lỗi ứng dụng — đã sửa bằng cách lọc bỏ href chứa `/payments` trước khi chọn, xác nhận lại `/admin/orders_audit/DD0001` (0 lỗi console).
+     Không sửa file nguồn nào trong task này (thuần kiểm thử). `npx tsc --noEmit` vẫn sạch.
 
 ## 2. Nhật ký lỗi phát hiện khi demo
 
@@ -162,6 +162,97 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
 - Task 9 (click-through tự động mở trang, không click nút bên trong): **0 lỗi** trên 82/83 trang (70 tĩnh + 12 chi tiết động đã lấy id thật + `/admin/orders_audit/[id]`). Route duy nhất chưa quét: `/admin/quotations/[id]/create-order` — xem Task 9b.
 - [FIXED] `/admin/orders_audit/[id]`, `/manager/orders/[id]` (modal "Chỉnh sửa đơn đặt") — React warning "two children with same key" ở dropdown Điều phối viên do `coordinatorName` trùng phần tử trong `COORDINATOR_POOL` — file `src/app/{admin/orders_audit,manager/orders}/[id]/page.tsx`, đã sửa bằng `Array.from(new Set(...))`.
 - [Không phải bug, giới hạn có sẵn] `/manager/quotations/[id]`, `/admin/quotations/[id]`, route mồ côi `/admin/quotations/[id]/create-order` — nút "Lưu đơn đặt & liên kết báo giá" trong `CreateOrderFromQuotationModal` không thực sự gọi `addAdminOrder()`, chỉ đóng modal/điều hướng — cần nối thật khi làm Task 15.
+
+## 2b. System Testing — Phản hồi buổi họp (ghi nhận 2026-07-15)
+
+> Liệt kê lại từ phản hồi thực tế khi test hệ thống + nội dung buổi họp nhóm, để có checklist theo dõi và tick khi xử lý xong. Khi làm từng mục, ghi rõ file đã sửa + kết quả kiểm tra (theo đúng format các Task ở mục 1/1b), và bổ sung phát hiện chi tiết (màn hình cụ thể, trường dữ liệu cụ thể) vào mục 2 nếu cần.
+
+### Lỗi ghi nhận khi System Testing
+
+- [X]  Chưa có cảnh báo cho những sự kiện đang gần đến ngày
+  Chưa có cơ chế nhắc/cảnh báo sự kiện sắp diễn ra (vd đơn có `weddingDate` trong vài ngày tới) trên dashboard hoặc màn hình lịch trình.
+- [X]  Chưa liên kết được với dữ liệu hệ thống (chưa kế thừa hệ thống)
+  Một số màn hình/luồng chưa kế thừa dữ liệu từ các domain khác trong hệ thống — cần rà lại theo đúng tinh thần "1 nguồn dữ liệu duy nhất, có quan hệ với nhau" đã làm ở Task 12-24 (mục 1b).
+  **Đã audit (2026-07-16, dùng 3 subagent rà toàn bộ trang Admin/Manager + 8 file mock ngoài `db/`)** — xác nhận đúng theo tinh thần Task 12-24: Khách hàng, Báo giá, Hợp đồng (trừ coordinator), Thanh toán, Nhà cung cấp (cả `manager/suppliers/purchase-orders`+`returns`), Khảo sát, Change Request/Handover, Dashboard Admin/Manager (trừ vài KPI tĩnh đã ghi chú do thiếu domain) đều liên kết đúng. 6 điểm còn tách rời — **đã sửa cả 6, tick từng mục bên dưới**:
+
+  - [X]  (1) `src/mocks/adminContractsMock.ts` — `CONTRACT_COORDINATOR_OPTIONS` (3 tên hard-code: Vũ Hoàng Long/Lê Minh Dũng/Nguyễn Thị Hương) gán cho `coordinatorName` mỗi hợp đồng nhưng không import từ `db/employees.ts` (`FIELD_OPS_STAFF`/`COORDINATOR_POOL`, 5 người) — trùng tên ngẫu nhiên do copy tay, không có ràng buộc thật.
+    **Đã sửa**: `CONTRACT_COORDINATOR_OPTIONS` giờ derive từ `COORDINATOR_POOL.slice(0, 3)` (`db/employees.ts`) thay vì mảng hard-code riêng — giữ nguyên đúng 3 tên cũ để không đổi coordinator của hợp đồng đã seed.
+  - [X]  (2) `src/mocks/apiFixtures.ts` — không import giá trị nào từ `db/*` (chỉ import type), các `orderId`/`supplierId` hiện khớp tay đúng với `db/orders.ts`/`db/suppliers.ts` nhưng không có ràng buộc runtime.
+    **Đã sửa**: thêm `ORDER_A_ID`/`ORDER_C_ID` (2 đơn thật đầu tiên từ `getAdminOrders()`) và `SUPPLIER_1`/`SUPPLIER_3`/`SUPPLIER_5` (tra thật từ `getAdminSuppliers()`) — mọi `orderId`/`supplierId`/`supplierName` trong `MOCK_SCHEDULE_PLANS`/`MOCK_SURVEY_REPORTS`/`MOCK_WAGES`/`MOCK_ORDER_WARNINGS`/`MOCK_SUPPLIER_TRANSACTIONS` đọc từ đó thay vì literal cố định.
+  - [X]  (3) `src/mocks/adminWarehouseOutboundMock.ts` (trang `admin/inventory/outbound`) — `bookingName` là chuỗi tự do, không có field `orderId` trỏ `db/orders.ts` thật.
+    **Đã sửa**: thêm field `orderId` (trỏ 10 đơn `CONFIRMED`/`IN_PROGRESS` đầu tiên), `bookingName` giờ derive từ `customerName` của đơn đó, `receiver` lấy từ `FIELD_OPS_STAFF` (`db/employees.ts`) thay vì `OUTBOUND_RECEIVER_OPTIONS` (đã xóa, vốn chưa từng được dùng thật). Thêm link mã đơn tới `/admin/orders_audit/[orderId]` ở trang chi tiết phiếu.
+  - [X]  (4) `src/mocks/adminInventoryReturnsMock.ts` (trang `admin/inventory/returns` **và** `manager/inventory/returns` — dùng chung 1 file) — `orderCode` dạng `ĐC-2026-0498` không tồn tại, form "Tạo phiếu" cho gõ tay tự do — nghiêm trọng nhất vì ảnh hưởng cả 2 role.
+    **Đã sửa**: thêm `getEligibleOrdersForReturn()` (đơn `IN_PROGRESS`/`COMPLETED` — đã thi công/hoàn thành), `orderCode` giờ LUÔN = `orderId` thật (`DD00xx`), `orderName`/`customerName` derive qua `getAdminOrderById()`. Form "Tạo phiếu" (cả Admin + Manager, đã mirror 1:1) đổi từ 3 ô nhập tay sang 1 Select chọn đơn thật, theo đúng pattern `manager/suppliers/returns`. Thêm link mã đơn tới trang chi tiết đơn ở cả list + detail (2 role).
+  - [X]  (5) `src/mocks/supplierServicesMock.ts` (trang `admin/catalog/supplier-services`) — `supplierName` tự sinh từ `SUPPLIER_POOL` (10 tên bịa) không khớp 7 NCC thật trong `db/suppliers.ts`.
+    **Đã sửa**: xóa `SUPPLIER_POOL`, thêm field `supplierId` trỏ thật (cycle qua 7 NCC thật vì có 128 dịch vụ > 7 NCC), `supplierName`/`supplierPhone` derive qua `getAdminSuppliers()`. `SupplierServiceFormModal.tsx`: đổi ô "Nhà cung cấp" từ Input tự do sang Select chọn NCC thật, số điện thoại tự động điền + khóa (disabled) theo NCC đã chọn.
+  - [X]  (6) `src/mocks/businessServicesMock.ts` (trang `admin/catalog/business-services`) — hệ phân loại riêng, 24 gói dịch vụ tự sinh độc lập, không có FK nào.
+    **Đã sửa** (người dùng chọn hướng "gộp vào `db/catalog.ts`"): di chuyển toàn bộ logic (`BusinessServicePackage`, `generateMockBusinessServices()`, CRUD) vào cuối `src/mocks/db/catalog.ts`, xóa file `businessServicesMock.ts` cũ, sửa 2 nơi import (`admin/catalog/business-services/page.tsx`, `BusinessServiceFormModal.tsx`) sang `@/mocks/db/catalog`. Giữ `BUSINESS_SERVICE_CATEGORY_OPTIONS` là hệ phân loại riêng (use-case sự kiện doanh nghiệp: Hội nghị/Team Building...) — KHÔNG ép dùng chung `EQUIPMENT_CATEGORY_OPTIONS` (loại thiết bị vật lý: Bàn ghế/Quạt...) vì 2 khái niệm khác bản chất, ép chung sẽ sai nghĩa; điểm gộp thật là chuyển vào cùng thư mục `db/` (nguồn dữ liệu duy nhất) thay vì đứng riêng ngoài `src/mocks/`.
+
+  File sửa thêm ngoài 6 mock file trên: `src/mocks/db/index.ts` (không đổi — `catalog` đã export sẵn), `src/app/admin/inventory/outbound/page.tsx`, `src/app/admin/inventory/returns/page.tsx` + `[id]/page.tsx`, `src/app/manager/inventory/returns/page.tsx` + `[id]/page.tsx`, `src/components/catalog/SupplierServiceFormModal.tsx`.
+  Đã kiểm tra: `npx tsc --noEmit` sạch sau mỗi mục; test bằng Playwright (đăng nhập Admin + Manager riêng biệt, không chỉ đọc code) — xác nhận: trang Hợp đồng load bình thường; chi tiết phiếu xuất kho hiện link mã đơn thật (`DD0011`); danh sách phiếu hoàn kho (cả 2 role) hiện mã đơn thật (`DD0023`) thay vì mã bịa, form "Tạo phiếu" có Select thay vì ô nhập tay; danh sách Dịch vụ NCC hiện đúng tên NCC thật ("Ánh Sáng Pro") khớp `db/suppliers.ts`, form sửa dịch vụ có Select NCC + số điện thoại tự động khóa; trang Dịch vụ doanh nghiệp vẫn load đúng sau khi gộp. 0 lỗi console trên toàn bộ luồng test.
+- [X]  Sửa lại đúng ngày không để mặc định!
+
+  ![1784133606565](images/DEMO_CHECKLIST/1784133606565.png)
+- [X]  khi bắt đầu chạy đang auto đăng nhập trước vào manager
+  **Nguyên nhân**: `src/app/auth/login/page.tsx` có `useEffect` tự động điều hướng sang dashboard nếu phát hiện đã có phiên đăng nhập lưu trong `localStorage` (từ lần đăng nhập trước) — mở lại `/` hoặc `/auth/login` sẽ tự nhảy thẳng vào Manager/Admin dashboard, không hiện form đăng nhập.
+  **Đã sửa**: xóa hẳn `useEffect` auto-redirect đó — trang login giờ LUÔN hiện form, dù còn phiên cũ hay không, theo đúng yêu cầu. `ProtectedRoute.tsx` (chặn truy cập trang đã bảo vệ khi CHƯA đăng nhập) giữ nguyên, không liên quan.
+  Đã kiểm tra: `npx tsc --noEmit` sạch; test Playwright — đăng nhập Manager xong, mở lại `/auth/login` và `/` đều hiện đúng form đăng nhập thay vì tự chuyển hướng. 0 lỗi console.
+- [X]  Đổi tên sao cho phù hợp
+
+  ![1784133641919](images/DEMO_CHECKLIST/1784133641919.png)
+- [X]  Chưa kế thừa dữ liệu (hiển thị ở lựa chọn đơn đặt hàng)
+
+  ![1784133674003](images/DEMO_CHECKLIST/1784133674003.png)
+- [X]  chưa cập nhật được trạng thái cọc
+  ![1784133724359](images/DEMO_CHECKLIST/1784133724359.png)
+- [X]  Search đc khách hàng
+
+  ![1784133772486](images/DEMO_CHECKLIST/1784133772486.png)
+- [X]  thu gọn theo mục và có thể search
+
+  ![1784133818568](images/DEMO_CHECKLIST/1784133818568.png)
+- [X]  khi phân công khảo sát xong phải button " quản lí kế hoạch khảo sát " chuyển thành " đổi lịch phân công" và update kế hoạch lên màn hình
+  ![1784134012532](images/DEMO_CHECKLIST/1784134012532.png)
+- [X]  xóa phần dự kiến
+
+  ![1784134145452](images/DEMO_CHECKLIST/1784134145452.png)
+- [X]  xóa cột tiến độ chuânr bị
+
+  ![1784134191888](images/DEMO_CHECKLIST/1784134191888.png)
+- [X]  Đơn hàng chưa có ngày kết thúc
+
+  ![1784138280836](images/DEMO_CHECKLIST/1784138280836.png)
+- [X]  Ở mốc 2, Phải xác nhận 2 công việc là cọc vào khảo sát
+
+  những đơn khi khởi tạo mà khách hàng đặt cọc luôn rồi thì xác nhận luôn là đã cọc, những đơn đc tạo khi đã khảo sát và cọc thì xác nhận luôn mốc 2
+
+  ![1784138431588](images/DEMO_CHECKLIST/1784138431588.png)
+- [X]  Ở mốc 3 có cập nhật trạng thái làm việc ( bắt đầu lúc mấy giờ, hoàn thành lúc mấy giờ) và không có tiến độ sắp xếp kho vật tư
+
+  ![1784139522919](images/DEMO_CHECKLIST/1784139522919.png)
+- [X]  Lỗi màn tạo quyết toán trong thanh toán
+
+  ![1784138527113](images/DEMO_CHECKLIST/1784138527113.png)
+- [X]  nội dung màn change request cũng hiện ở icon chuông trên header
+
+  ![1784138644832](images/DEMO_CHECKLIST/1784138644832.png)
+- [X]  Code  thêm màn policy ở admin
+- [X]  ở điều khoản chung trong báo giá liên kết với policy trong admin và view nội dung ra
+  **Nguyên nhân**: khối "Chính sách chung:" ở trang chi tiết báo giá (`admin/quotations/[id]`, `manager/quotations/[id]`) trước đây là 2 dòng text hard-code cố định ("Báo giá có hiệu lực trong vòng 30 ngày...", "Tạm ứng trước 50%...") — không đọc từ đâu cả, kể cả sau khi đã có màn `/admin/policies` quản lý chính sách thật (task trước đó).
+  **Đã sửa** (cả 2 trang, logic giống hệt nhau): import thẳng `MOCK_POLICIES` (`@/mocks/apiFixtures` — cùng nguồn dữ liệu mà `/admin/policies` đọc/ghi qua `policyApiService`), lọc các chính sách **đang áp dụng** thuộc loại `DEPOSIT`/`CANCELLATION` (2 loại liên quan trực tiếp tới điều khoản báo giá — cọc & hoàn cọc khi hủy; `COMPENSATION`/`FEE`/`WAGE` thuộc giai đoạn thi công/vận hành, không phải điều khoản báo giá nên không đưa vào đây) — hiện mỗi chính sách dạng `• {tên chính sách}: {giá trị}{đơn vị} — {mô tả}` (giá trị luôn hiện tường minh, không chỉ dựa vào câu mô tả, vì mô tả tự do không phải lúc nào cũng nhắc lại đúng con số — vd chính sách "Tỉ lệ đặt cọc tiêu chuẩn" có mô tả không hề chứa số %). Dòng "hiệu lực báo giá" đổi từ hard-code "30 ngày" sang hiện đúng ngày hết hạn thật `row.validUntil` của từng báo giá.
+  File đã sửa: `src/app/admin/quotations/[id]/page.tsx`, `src/app/manager/quotations/[id]/page.tsx`.
+  Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin, **điều hướng bằng click thật trong app** — không dùng `page.goto()` giữa các bước vì phát hiện `MOCK_POLICIES` là mảng in-memory thuần như `schedulePlans.ts`, reload cứng sẽ mất thay đổi vừa sửa, không phải lỗi của tính năng) — mở báo giá `bg-1` thấy đúng 4 chính sách thật (3 mốc hoàn cọc + tỉ lệ cọc chuẩn) kèm ngày hết hạn thật; sang `/admin/policies` sửa "Tỉ lệ đặt cọc tiêu chuẩn" từ 50% → 60% → quay lại đúng báo giá `bg-1` bằng điều hướng trong app → **giá trị trên báo giá cập nhật ngay thành 60%**, chứng minh liên kết dữ liệu thật (không phải 2 nguồn tách rời). Đối chiếu thêm phía Manager (`manager/quotations/bg-1`) hiển thị đúng. 0 lỗi console.
+
+  ![1784140800106](images/DEMO_CHECKLIST/1784140800106.png)
+- [X]  Liên kết dữ liệu với mock data, khi click vào thì ra màn của nội dung đấy
+
+  ![1784140587206](images/DEMO_CHECKLIST/1784140587206.png)
+  **Nguyên nhân**: 4 thẻ KPI ở "Tổng quan" Admin (Doanh thu tháng/Đơn đặt mới/Báo giá chờ duyệt/Khách hàng mới) đã tính đúng số liệu thật từ mock data, nhưng thẻ chỉ là `<div>` tĩnh — bấm vào không có phản ứng gì, không dẫn tới màn danh sách tương ứng.
+  **Đã sửa**: thêm field `href?: string` vào `KpiCardItem` (`src/components/reports/DashboardStats.tsx`, component KPI dùng chung toàn site) — có `href` thì thẻ tự bọc trong `<Link>` (bấm được, có hover shadow), không có thì giữ nguyên `<div>` tĩnh như cũ (không phá vỡ các nơi khác đang dùng component này mà chưa cần link, vd trang Pick-list xuất kho). Gắn `href` cho từng thẻ:
+  - Admin (`admin/dashboard/page.tsx`): Doanh thu tháng → `/admin/reports/revenue`, Đơn đặt mới → `/admin/orders_audit`, Báo giá chờ duyệt → `/admin/quotations`, Khách hàng mới → `/admin/customers`.
+  - Manager (`manager/dashboard/page.tsx`, cùng component dùng chung nên sửa luôn cho nhất quán): Đơn đang xử lý → `/manager/orders`, Việc cần làm hôm nay → `/manager/schedule/tasks`, Cảnh báo tồn kho → `/manager/inventory/stock-check`. Riêng "Chờ xác nhận" **không gắn link** — danh sách chi tiết của đúng số liệu này đã hiện sẵn ngay bên dưới trên cùng trang (`PendingConfirmationsCard`), gắn thêm link ra trang khác sẽ dư thừa/gây nhầm.
+  File đã sửa: `src/components/reports/DashboardStats.tsx`, `src/app/admin/dashboard/page.tsx`, `src/app/manager/dashboard/page.tsx`.
+  Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin + Manager riêng biệt, không chỉ đọc code) — xác nhận cả 4 thẻ Admin và 3/4 thẻ Manager có đúng `href` như thiết kế; bấm thật vào thẻ "Đơn đặt mới" → điều hướng đúng sang `/admin/orders_audit`; xác nhận thẻ "Chờ xác nhận" bên Manager **không** phải link (đúng chủ đích). 0 lỗi console.
 
 ---
 

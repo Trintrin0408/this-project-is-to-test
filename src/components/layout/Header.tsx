@@ -1,20 +1,35 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, HelpCircle, Search, UserCircle, KeyRound, LogOut } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { Input } from '@/components/ui/Input';
+import { getApproachingEvents, type ApproachingEvent } from '@/mocks/db/approachingEvents';
+import { getFieldChangeRequests, CHANGE_REQUEST_TYPE_META } from '@/mocks/db/changeRequests';
 
 export default function Header() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
 
-  const basePath = user?.role.roleName === 'Admin' ? '/admin' : '/manager';
+  const isAdmin = user?.role.roleName === 'Admin';
+  const basePath = isAdmin ? '/admin' : '/manager';
+
+  const approachingEvents = useMemo<ApproachingEvent[]>(() => getApproachingEvents(7), []);
+  // Duyệt Change Request là việc của Manager (CLAUDE.md mục 1 — Admin không trực tiếp phê duyệt change
+  // request), và trang danh sách chỉ tồn tại ở `/manager/field-ops/change-requests` — nên chỉ tính/hiện
+  // mục này cho Manager, không hiện cho Admin.
+  const pendingChangeRequests = useMemo(() => (isAdmin ? [] : getFieldChangeRequests().filter((cr) => cr.status === 'PENDING')), [isAdmin]);
+  const totalNotifications = approachingEvents.length + pendingChangeRequests.length;
+
+  const orderDetailPath = (orderId: string) =>
+    `${user?.role.roleName === 'Admin' ? '/admin/orders_audit' : '/manager/orders'}/${orderId}`;
 
   useEffect(() => {
     if (!isMenuOpen) return;
@@ -26,6 +41,17 @@ export default function Header() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMenuOpen]);
+
+  useEffect(() => {
+    if (!isNotifOpen) return;
+    const handleClickOutsideNotif = (event: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setIsNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutsideNotif);
+    return () => document.removeEventListener('mousedown', handleClickOutsideNotif);
+  }, [isNotifOpen]);
 
   const handleLogout = () => {
     logout();
@@ -42,17 +68,115 @@ export default function Header() {
         />
       </div>
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          aria-label="Thông báo"
-          className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors duration-150 hover:bg-slate-50 hover:text-slate-600"
-        >
-          <Bell className="h-5 w-5" />
-          {/* Chấm báo hiệu thay vì số đếm — docs/api/ chưa có endpoint danh sách thông báo nên chưa
-              có số thật; hiện trạng thái "có thông báo" thay vì bịa 1 con số cụ thể. */}
-          <span className="absolute right-2.5 top-2.5 h-2 w-2 animate-ping rounded-full bg-red-500" />
-          <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-red-500" />
-        </button>
+        <div ref={notifRef} className="relative">
+          <button
+            type="button"
+            aria-label="Thông báo"
+            onClick={() => setIsNotifOpen((open) => !open)}
+            className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors duration-150 hover:bg-slate-50 hover:text-slate-600"
+          >
+            <Bell className="h-5 w-5" />
+            {totalNotifications > 0 && (
+              <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white">
+                {totalNotifications > 9 ? '9+' : totalNotifications}
+              </span>
+            )}
+          </button>
+
+          <AnimatePresence>
+            {isNotifOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 top-full mt-2 w-80 overflow-hidden rounded-xl bg-white py-1.5 shadow-lg ring-1 ring-slate-100"
+              >
+                <div className="flex items-center justify-between px-3.5 py-2.5">
+                  <p className="text-sm font-semibold text-slate-900">Mốc sắp diễn ra</p>
+                  {approachingEvents.length > 0 && (
+                    <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">
+                      {approachingEvents.length}
+                    </span>
+                  )}
+                </div>
+                <div className="h-px bg-slate-100" />
+                <div className="max-h-80 overflow-y-auto">
+                  {approachingEvents.length === 0 ? (
+                    <p className="px-3.5 py-6 text-center text-xs text-slate-400">
+                      Không có mốc thời gian nào sắp diễn ra trong 7 ngày tới.
+                    </p>
+                  ) : (
+                    approachingEvents.map((event) => (
+                      <Link
+                        key={`${event.orderId}-${event.label}`}
+                        href={orderDetailPath(event.orderId)}
+                        onClick={() => setIsNotifOpen(false)}
+                        className="flex items-start gap-2.5 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-slate-50"
+                      >
+                        <span
+                          className={`mt-1 h-2 w-2 shrink-0 rounded-full ${event.daysLeft <= 3 ? 'bg-red-500' : 'bg-amber-500'}`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-slate-800">
+                            {event.customerName} — {event.venue}
+                          </span>
+                          <span
+                            className={`text-xs font-semibold ${event.daysLeft <= 3 ? 'text-red-600' : 'text-amber-600'}`}
+                          >
+                            {event.label} · Còn {event.daysLeft} ngày ({event.orderId})
+                          </span>
+                        </span>
+                      </Link>
+                    ))
+                  )}
+                </div>
+
+                {!isAdmin && (
+                  <>
+                    <div className="h-px bg-slate-100" />
+                    <div className="flex items-center justify-between px-3.5 py-2.5">
+                      <p className="text-sm font-semibold text-slate-900">Yêu cầu thay đổi chờ duyệt</p>
+                      {pendingChangeRequests.length > 0 && (
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600">
+                          {pendingChangeRequests.length}
+                        </span>
+                      )}
+                    </div>
+                    <div className="h-px bg-slate-100" />
+                    <div className="max-h-80 overflow-y-auto">
+                      {pendingChangeRequests.length === 0 ? (
+                        <p className="px-3.5 py-6 text-center text-xs text-slate-400">
+                          Không có yêu cầu thay đổi nào đang chờ duyệt.
+                        </p>
+                      ) : (
+                        pendingChangeRequests.map((cr) => (
+                          <Link
+                            key={cr.id}
+                            href="/manager/field-ops/change-requests"
+                            onClick={() => setIsNotifOpen(false)}
+                            className="flex items-start gap-2.5 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-slate-50"
+                          >
+                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-medium text-slate-800">
+                                {cr.customerName} — {CHANGE_REQUEST_TYPE_META[cr.type].label}
+                              </span>
+                              <span className="block truncate text-xs text-slate-500">{cr.reason}</span>
+                              <span className="text-xs font-semibold text-amber-600">
+                                {cr.orderId} · {cr.requestedBy}
+                              </span>
+                            </span>
+                          </Link>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
         <button
           type="button"
           aria-label="Trợ giúp"

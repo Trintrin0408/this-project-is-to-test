@@ -226,7 +226,9 @@ const PACKAGE_POOL = [
 ];
 
 
-const VENUE_POOL = [
+// export để orders.ts dùng chung đúng 1 pool tên địa điểm thật (không tự khai riêng "Riverside
+// Palace" hard-code như trước — xem DEMO_CHECKLIST.md mục "Chưa kế thừa dữ liệu").
+export const VENUE_POOL = [
   'Riverside Palace (Sảnh Hera)', 'White Palace (Sảnh Rose)', 'Diamond Center (Sảnh Kim Cương)',
   'Grand Palace (Sảnh Ngọc)', 'Rex Hotel (Sảnh Hoàng Gia)', 'Adora Center (Sảnh Adora)',
 ];
@@ -455,7 +457,11 @@ function generateMockQuotations(): AdminQuotationRow[] {
       status,
       assignee: ASSIGNEE_POOL[index % ASSIGNEE_POOL.length],
       createdAt,
-      updatedAt: lastUpdatedDate(status),
+      // "Cập nhật cuối" theo mốc chung của status (lastUpdatedDate) nhưng không được SỚM HƠN ngày tạo
+      // — createdAt dao động rộng (0-89 ngày trước "hôm nay") trong khi lastUpdatedDate chỉ trong vòng
+      // 7 ngày gần "hôm nay", nên với báo giá có createdAt gần "hôm nay" (index nhỏ), lastUpdatedDate có
+      // thể rơi vào TRƯỚC createdAt nếu không chặn — vô lý (cập nhật trước khi tạo).
+      updatedAt: [createdAt, lastUpdatedDate(status)].sort().at(-1) as string,
       validUntil: addDays(today, 20 + (index % 15)),
       surveyAssignment,
     };

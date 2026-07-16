@@ -73,26 +73,6 @@ export default function ManagerPicklistsPage() {
     { key: 'weddingDate', label: 'Ngày thi công', render: (s) => formatDate(s.row.weddingDate) },
     { key: 'coordinatorName', label: 'Điều phối viên', render: (s) => s.row.coordinatorName },
     {
-      key: 'progress',
-      label: 'Tiến độ chuẩn bị',
-      render: (s) => {
-        const isAllPrepared = s.totalItemsCount > 0 && s.preparedItemsCount >= s.totalItemsCount;
-        const percent = s.totalItemsCount > 0 ? (s.preparedItemsCount / s.totalItemsCount) * 100 : 0;
-        return (
-          <div className="min-w-[140px]">
-            <div className="flex items-center justify-between text-[11px] font-semibold">
-              <span className={isAllPrepared ? 'text-emerald-600' : 'text-amber-600'}>
-                {s.preparedItemsCount}/{s.totalItemsCount} thiết bị
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-              <div className={`h-1.5 rounded-full ${isAllPrepared ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${percent}%` }} />
-            </div>
-          </div>
-        );
-      },
-    },
-    {
       key: 'exportStatus',
       label: 'Trạng thái xuất kho',
       render: (s) => (

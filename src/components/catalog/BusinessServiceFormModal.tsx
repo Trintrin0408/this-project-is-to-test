@@ -11,7 +11,7 @@ import {
   BusinessServicePackage,
   BusinessServiceStatus,
   nextBusinessServiceCode,
-} from '@/mocks/businessServicesMock';
+} from '@/mocks/db/catalog';
 
 interface BusinessServiceFormModalProps {
   isOpen: boolean;

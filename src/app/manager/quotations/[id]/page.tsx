@@ -50,6 +50,7 @@ import { getAdminContracts } from '@/mocks/adminContractsMock';
 import { getSurveyReportByQuotationId } from '@/mocks/db';
 import { getAdminSchedulePlanByQuotationId } from '@/mocks/db/schedulePlans';
 import { getAdminOrders } from '@/mocks/db/orders';
+import { MOCK_POLICIES } from '@/mocks/apiFixtures';
 
 // Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminQuotationsMock.ts. Mirror 1:1 của
 // src/app/admin/quotations/[id]/page.tsx dưới path /manager/quotations/[id] — dùng chung mock/store
@@ -110,10 +111,14 @@ export default function ManagerQuotationDetailPage() {
   // Báo giá nháp: phân công khảo sát điều phối qua Kế hoạch & phân công (lịch, nhân sự) thay vì chỉ
   // 1 field đơn giản như báo giá đã qua khảo sát — xem giải thích ở đầu adminSchedulePlansMock.ts.
   const linkedSurveyPlan = row.status === 'draft' ? getAdminSchedulePlanByQuotationId(row.quotationId) : undefined;
+  const linkedSurveyActivity = linkedSurveyPlan?.activities.find((a) => a.type === 'Khảo sát');
   const linkedOrder = row.status === 'approved' ? getAdminOrders().find((o) => o.quotationId === row.quotationId) : undefined;
   const equipmentCheckItems = row.items
     .filter((it) => it.category.includes('Thiết bị') || it.category.includes('Thi công'))
     .map((it) => ({ name: it.name, quantity: it.quantity, unit: it.unit ?? '' }));
+  // "Chính sách chung" hiện đúng nội dung chính sách đặt cọc/hủy đơn thật đang quản lý ở
+  // /admin/policies (thay vì text hard-code) — sửa policy trong Admin sẽ phản ánh ngay ở đây.
+  const generalPolicies = MOCK_POLICIES.filter((p) => p.isActive && (p.policyType === 'DEPOSIT' || p.policyType === 'CANCELLATION'));
 
   const refresh = () => setDetail(getAdminQuotationDetail(id));
 
@@ -145,7 +150,7 @@ export default function ManagerQuotationDetailPage() {
 
   const handleSurveySubmit = () => {
     if (!surveyForm.assigneeName || !surveyForm.date || !surveyForm.time) return;
-    updateAdminQuotation(row.quotationId, { surveyAssignment: surveyForm });
+    updateAdminQuotation(row.quotationId, { surveyAssignment: surveyForm, updatedAt: new Date().toISOString().slice(0, 10) });
     refresh();
     setIsSurveyModalOpen(false);
   };
@@ -286,7 +291,7 @@ export default function ManagerQuotationDetailPage() {
                   <ClipboardCheck className="h-4 w-4" />
                   {row.status === 'draft'
                     ? linkedSurveyPlan
-                      ? 'Quản lý kế hoạch khảo sát'
+                      ? 'Đổi lịch phân công'
                       : 'Lập kế hoạch khảo sát báo giá'
                     : row.surveyAssignment
                       ? 'Đổi phân công khảo sát'
@@ -364,12 +369,32 @@ export default function ManagerQuotationDetailPage() {
               className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              {row.surveyAssignment ? 'Đổi phân công' : 'Phân công'}
+              {row.status === 'draft' ? (linkedSurveyPlan ? 'Đổi lịch phân công' : 'Phân công') : row.surveyAssignment ? 'Đổi phân công' : 'Phân công'}
             </button>
           )}
         </div>
         <div className="mt-3">
-          {!row.surveyAssignment ? (
+          {row.status === 'draft' ? (
+            !linkedSurveyPlan ? (
+              <p className="text-sm text-slate-500">Chưa phân công khảo sát cho báo giá này.</p>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Avatar name={linkedSurveyPlan.staffList[0]?.name ?? linkedSurveyPlan.manager} size="sm" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800">
+                      {linkedSurveyPlan.staffList.map((s) => s.name).join(', ') || linkedSurveyPlan.manager}
+                    </p>
+                    <p className="truncate text-xs text-slate-400">
+                      {linkedSurveyActivity ? `${formatDate(linkedSurveyActivity.date)} · ${linkedSurveyActivity.startTime}` : formatDate(linkedSurveyPlan.eventDate)}
+                      {` — Kế hoạch ${linkedSurveyPlan.id}`}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="info">Đã lập kế hoạch</Badge>
+              </div>
+            )
+          ) : !row.surveyAssignment ? (
             <p className="text-sm text-slate-500">Chưa phân công khảo sát cho báo giá này.</p>
           ) : (
             <div className="flex items-center justify-between gap-3">
@@ -468,8 +493,13 @@ export default function ManagerQuotationDetailPage() {
                 </div>
                 <div className="space-y-1 text-xs text-slate-500">
                   <p className="font-semibold text-slate-700">Chính sách chung:</p>
-                  <p>• Báo giá có hiệu lực trong vòng 30 ngày kể từ ngày ban hành.</p>
-                  <p>• Tạm ứng trước 50% ngay sau khi ký hợp đồng chính thức.</p>
+                  <p>• Báo giá có hiệu lực đến hết ngày {formatDate(row.validUntil)}.</p>
+                  {generalPolicies.map((policy) => (
+                    <p key={policy.policyId}>
+                      • {policy.policyName}: <strong className="font-semibold text-slate-700">{policy.policyValue.toLocaleString('vi-VN')}{policy.unit}</strong>
+                      {policy.description ? ` — ${policy.description}` : ''}
+                    </p>
+                  ))}
                 </div>
               </div>
             </div>

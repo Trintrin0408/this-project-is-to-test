@@ -1,4 +1,4 @@
-import { BOOKING_STATUS_META, getAdminOrderById, getAdminOrders } from './orders';
+import { BOOKING_STATUS_META, BookingStatus, getAdminOrderById, getAdminOrders } from './orders';
 import { createMockStore, nextSequentialId } from './utils';
 
 // Nguồn Deposit/Settlement DUY NHẤT cho toàn bộ UI (Admin + Manager) — trước đây là
@@ -247,13 +247,14 @@ export interface OrderPaymentView {
   eventDate: string;
   venue: string;
   eventStatus: string;
+  /** Trạng thái đơn hàng THẬT (khác `eventStatus` chỉ là nhãn hiển thị) — dùng để chặn quyết toán
+   * cuối kỳ khi đơn còn chưa thi công (xem DEMO_CHECKLIST.md mục "Lỗi màn tạo quyết toán"). */
+  orderStatus: BookingStatus;
   managerName: string;
   customerName: string;
   customerPhone: string;
   totalValue: number;
   depositAmount: number;
-  depositIsEstimated: boolean;
-  depositEstimatedLabel?: string;
   depositCode: string;
   depositDueDate: string;
   depositPaymentDate?: string;
@@ -282,13 +283,12 @@ export function getOrderPaymentViews(): OrderPaymentView[] {
         eventDate: row.weddingDate,
         venue: row.venue,
         eventStatus: BOOKING_STATUS_META[row.status].label,
+        orderStatus: row.status,
         managerName: row.coordinatorName,
         customerName: row.customerName,
         customerPhone: row.customerPhone,
         totalValue: row.totalPrice,
         depositAmount: deposit.amount,
-        depositIsEstimated: deposit.isEstimated,
-        depositEstimatedLabel: deposit.estimatedLabel,
         depositCode: deposit.depositCode,
         depositDueDate: deposit.dueDate,
         depositPaymentDate: deposit.paymentDate,

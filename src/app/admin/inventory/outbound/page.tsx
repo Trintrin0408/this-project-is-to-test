@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { AlertCircle, ArrowLeft, Calendar, CheckCircle2, ClipboardList, Clock, Eye, FileText, Search, Truck, Users } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
@@ -126,6 +127,9 @@ export default function AdminWarehouseOutboundPage() {
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Tên đơn đặt</p>
                 <p className="text-sm font-bold text-slate-800">{selectedVoucher.bookingName}</p>
+                <Link href={`/admin/orders_audit/${selectedVoucher.orderId}`} className="text-xs font-semibold text-blue-600 hover:underline">
+                  {selectedVoucher.orderId}
+                </Link>
               </div>
             </div>
             <div className="flex items-start gap-3">

@@ -101,6 +101,7 @@ export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotati
       customerName: quotation.customerName,
       customerPhone: quotation.customerPhone,
       weddingDate: eventDate,
+      weddingEndDate: eventDate,
       venue,
       guestCount,
       totalPrice: total,

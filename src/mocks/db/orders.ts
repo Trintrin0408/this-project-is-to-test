@@ -2,10 +2,14 @@ import type { BadgeVariant } from '@/components/ui/Badge';
 import { getStatusBadgeVariant } from '@/components/ui/Badge';
 import { ORDER_STATUS_LABEL } from '@/constants/order-status';
 import type { OrderStatus } from '@/types/order';
-import { getAdminQuotations } from './quotations';
+import { getAdminQuotations, VENUE_POOL } from './quotations';
 import { getAdminCustomers, getAdminCustomerById, type AdminCustomer } from './customers';
 import { createMockStore, nextSequentialId } from './utils';
 import { COORDINATOR_POOL } from './employees';
+
+// REFERENCE_TODAY re-export để adminDashboard.ts (đã import nhiều named export từ
+// '@/mocks/db/orders') lấy luôn từ đây thay vì thêm dòng import '@/mocks/db/utils' riêng.
+export { REFERENCE_TODAY } from './utils';
 
 // COORDINATOR_POOL re-export để các file đang import từ '@/mocks/db/orders' (thay vì trực tiếp từ
 // './employees') không cần sửa lại đường dẫn — giá trị THẬT lấy từ db/employees.ts (Task 18, nguồn
@@ -36,7 +40,12 @@ export const BOOKING_STATUS_META: Record<BookingStatus, { label: string; variant
   CANCELLED: { label: ORDER_STATUS_LABEL.CANCELLED, variant: getStatusBadgeVariant('CANCELLED'), color: '#ef4444' },
 };
 
-export const VENUE_OPTIONS = ['Sảnh Hera', 'Sảnh Artemis', 'Sảnh Zeus', 'Sảnh Aphrodite'];
+// Dùng chung đúng 1 pool tên địa điểm thật với Quotation (db/quotations.ts) — trước đây tự khai
+// riêng 4 tên hall ngắn ("Sảnh Hera"...) không khớp Quotation.venue, khiến mọi nơi hiển thị địa
+// điểm đơn hàng (schedulePlans.ts, changeRequests.ts, surveyReports.ts, chi tiết đơn) phải tự
+// hard-code thêm tiền tố "Riverside Palace (...)" — sai với đơn không thuộc venue đó. Xem
+// DEMO_CHECKLIST.md mục "Chưa kế thừa dữ liệu (hiển thị ở lựa chọn đơn đặt hàng)".
+export const VENUE_OPTIONS = VENUE_POOL;
 export const PACKAGE_OPTIONS = ['Lễ cưới - Gói Platinum', 'Lễ cưới - Gói Diamond', 'Lễ cưới - Gói Gold', 'Lễ cưới - Gói Silver', 'Lễ cưới - Gói Standard'];
 
 export interface ChecklistItem {
@@ -102,6 +111,7 @@ export interface AdminOrderRow {
   customerName: string;
   customerPhone: string;
   weddingDate: string; // YYYY-MM-DD
+  weddingEndDate: string; // YYYY-MM-DD — ngày kết thúc sự kiện, mặc định bằng weddingDate cho sự kiện 1 ngày
   venue: string;
   guestCount: number;
   totalPrice: number;
@@ -245,6 +255,7 @@ function generateMockOrders(): AdminOrderRow[] {
       customerName: customer.customerName,
       customerPhone: customer.phone,
       weddingDate: addDays(today, dayOffset),
+      weddingEndDate: addDays(today, dayOffset),
       venue,
       guestCount,
       totalPrice,
@@ -529,7 +540,7 @@ export function getAdminOrderDetail(id: string): AdminOrderDetail | undefined {
   return {
     row,
     eventName: `Lễ cưới ${row.customerName}`,
-    location: `Riverside Palace (${row.venue})`,
+    location: row.venue,
     timeWindow: `17:30 - 22:00, ${row.weddingDate.split('-').reverse().join('/')}`,
     createdAt: '10/07/2026',
     customerEmail: customer?.email ?? '',

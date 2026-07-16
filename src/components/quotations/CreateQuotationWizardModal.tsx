@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Button } from '@/components/ui/Button';
 import CustomerFormModal from '@/components/customers/CustomerFormModal';
 import { formatCurrency } from '@/utils/formatCurrency';
@@ -58,6 +58,18 @@ function draftItemFromCatalog(catalogItem: Item): DraftLineItem {
 }
 
 const CATALOG_ITEMS = MOCK_ITEMS.filter((item) => item.status === 'ACTIVE');
+
+// Nhóm theo `typeName` (= tên danh mục thiết bị, xem db/catalog.ts) để hiện dạng thu gọn theo mục
+// thay vì liệt kê phẳng toàn bộ 71 item cùng lúc.
+const CATALOG_ITEMS_BY_CATEGORY: { category: string; items: Item[] }[] = Array.from(
+  CATALOG_ITEMS.reduce((map, item) => {
+    const category = item.typeName ?? 'Khác';
+    const bucket = map.get(category) ?? [];
+    bucket.push(item);
+    map.set(category, bucket);
+    return map;
+  }, new Map<string, Item[]>()),
+).map(([category, items]) => ({ category, items }));
 
 const cellInputClassName =
   'w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500';
@@ -118,12 +130,33 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const selectedCustomer = customers.find((c) => c.customerId === selectedCustomerId) ?? null;
   const [items, setItems] = useState<DraftLineItem[]>([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
 
   const resetState = () => {
     setStep(1);
     setSelectedCustomerId('');
     setItems([]);
+    setCatalogSearch('');
+    setOpenCategories(new Set());
   };
+
+  const toggleCategory = (category: string) =>
+    setOpenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+
+  const catalogGroups = useMemo(() => {
+    const term = catalogSearch.trim().toLowerCase();
+    if (!term) return CATALOG_ITEMS_BY_CATEGORY;
+    return CATALOG_ITEMS_BY_CATEGORY.map((group) => ({
+      category: group.category,
+      items: group.items.filter((it) => it.itemName.toLowerCase().includes(term)),
+    })).filter((group) => group.items.length > 0);
+  }, [catalogSearch]);
 
   const handleClose = () => {
     resetState();
@@ -170,7 +203,7 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
       }));
     const finalSubtotal = cleanItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
     const finalDiscount = cleanItems.reduce((sum, it) => sum + (it.discount ?? 0) * it.quantity, 0);
-    const today = new Date('2026-07-10');
+    const today = new Date();
 
     addAdminQuotation({
       quotationId: `bg-${Date.now()}`,
@@ -226,14 +259,14 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
             <p className="mt-1 text-sm text-slate-500">Báo giá bắt buộc phải gắn liền với một khách hàng có trên hệ thống.</p>
 
             <div className="mt-5">
-              <Select
+              <SearchableSelect
                 label="Lựa chọn khách hàng có sẵn"
                 value={selectedCustomerId}
-                onChange={(e) => setSelectedCustomerId(e.target.value)}
-                options={[
-                  { value: '', label: '-- Chọn khách hàng --' },
-                  ...customers.map((c) => ({ value: c.customerId, label: `${c.customerName} (${c.customerId} - ${c.phone})` })),
-                ]}
+                onChange={setSelectedCustomerId}
+                placeholder="-- Chọn khách hàng --"
+                searchPlaceholder="Tìm theo tên, mã khách hàng hoặc số điện thoại..."
+                emptyText="Không tìm thấy khách hàng phù hợp."
+                options={customers.map((c) => ({ value: c.customerId, label: `${c.customerName} (${c.customerId} - ${c.phone})` }))}
               />
 
               <div className="my-5 flex items-center gap-3">
@@ -281,18 +314,52 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
 
             <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
               <p className="text-xs font-semibold text-slate-500">Chọn nhanh từ danh mục kho thiết bị có sẵn:</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {CATALOG_ITEMS.map((catalogItem) => (
-                  <button
-                    key={catalogItem.itemId}
-                    type="button"
-                    onClick={() => addCatalogItem(catalogItem)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {catalogItem.itemName} ({formatCurrency(catalogItem.rentalPrice)})
-                  </button>
-                ))}
+              <div className="relative mt-3">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  placeholder="Tìm thiết bị theo tên..."
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {catalogGroups.map((group) => {
+                  const isOpen = catalogSearch.trim() !== '' || openCategories.has(group.category);
+                  return (
+                    <div key={group.category} className="rounded-lg border border-slate-200 bg-white">
+                      <button
+                        type="button"
+                        onClick={() => toggleCategory(group.category)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        <span>
+                          {group.category} <span className="font-normal text-slate-400">({group.items.length})</span>
+                        </span>
+                        <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="flex flex-wrap gap-2 border-t border-slate-100 p-3">
+                          {group.items.map((catalogItem) => (
+                            <button
+                              key={catalogItem.itemId}
+                              type="button"
+                              onClick={() => addCatalogItem(catalogItem)}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {catalogItem.itemName} ({formatCurrency(catalogItem.rentalPrice)})
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {catalogGroups.length === 0 && (
+                  <p className="rounded-lg bg-white py-3 text-center text-xs italic text-slate-400">Không tìm thấy thiết bị phù hợp.</p>
+                )}
               </div>
             </div>
 

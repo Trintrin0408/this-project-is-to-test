@@ -7,6 +7,8 @@ import type { WageRecord } from '@/types/wage';
 import type { OrderWarning } from '@/types/orderWarning';
 import type { Evidence } from '@/types/evidence';
 import type { SupplierTransaction } from '@/types/procurement';
+import { getAdminOrders } from '@/mocks/db/orders';
+import { getAdminSuppliers } from '@/mocks/db/suppliers';
 
 // Dữ liệu ảo dùng riêng cho lớp mock adapter (src/services/mockAdapter.ts) — phục vụ các màn hình
 // còn gọi thẳng qua services/*.service.ts (chưa chuyển sang đọc trực tiếp từ src/mocks như phần lớn
@@ -18,6 +20,18 @@ import type { SupplierTransaction } from '@/types/procurement';
 // của types/customer.ts, types/order.ts) thay vì có mảng MOCK_CUSTOMERS/MOCK_ORDERS riêng ở đây.
 
 const NOW = '2026-07-10T00:00:00Z';
+
+// 2 đơn thật + 3 nhà cung cấp thật dùng làm dữ liệu mẫu bên dưới — lấy ĐỘNG từ getAdminOrders()/
+// getAdminSuppliers() (db/orders.ts, db/suppliers.ts) thay vì hardcode literal 'DD0001'/'sup-1'/
+// 'Ánh Sáng Pro' cố định như trước, để không lệch ngầm nếu seed đơn hàng/nhà cung cấp đổi sau này.
+const ALL_ORDERS = getAdminOrders();
+const ORDER_A_ID = (ALL_ORDERS[0]?.orderId ?? 'DD0001') as string;
+const ORDER_C_ID = (ALL_ORDERS[2]?.orderId ?? 'DD0003') as string;
+
+const ALL_SUPPLIERS = getAdminSuppliers();
+const SUPPLIER_1 = ALL_SUPPLIERS.find((s) => s.supplierId === 'sup-1') ?? ALL_SUPPLIERS[0];
+const SUPPLIER_3 = ALL_SUPPLIERS.find((s) => s.supplierId === 'sup-3') ?? ALL_SUPPLIERS[2];
+const SUPPLIER_5 = ALL_SUPPLIERS.find((s) => s.supplierId === 'sup-5') ?? ALL_SUPPLIERS[4];
 
 export const MOCK_USERS: AdminUser[] = [
   { userId: 'mock-admin-1', username: 'admin', fullName: 'Quản trị viên hệ thống', role: 'ADMIN', status: 'ACTIVE', createdAt: NOW, updatedAt: NOW },
@@ -40,21 +54,21 @@ export const MOCK_WORK_TASKS: WorkTask[] = [
 // SchedulePlan (khảo sát + thi công) cho src/components/orders/SurveyPersonnelTab.tsx — component
 // này hiện chưa được trang nào import/render (grep "SurveyPersonnelTab" chỉ ra chính file nó), nên
 // dữ liệu dưới đây chưa có tác dụng hiển thị thật cho tới khi có trang gắn lại component; giữ sẵn để
-// không phải làm lại khi component được wire vào chi tiết đơn hàng. orderId đã đổi sang trỏ đơn thật
-// (DD0001/DD0003 trong src/mocks/db/orders.ts) sau khi Task 14 hợp nhất Order — trước đây là
-// 'order-1'/'order-3' của MOCK_ORDERS (đã xóa).
+// không phải làm lại khi component được wire vào chi tiết đơn hàng. orderId trỏ đơn thật (2 đơn đầu
+// tiên trong src/mocks/db/orders.ts, lấy động qua ORDER_A_ID/ORDER_C_ID ở đầu file — Task "System
+// Testing" audit 2b-2) — trước đây hardcode literal 'DD0001'/'DD0003' cố định.
 export const MOCK_SCHEDULE_PLANS: SchedulePlan[] = [
-  { planId: 'plan-1', planCode: 'KH-001', orderId: 'DD0001', taskId: 'task-survey', assignedTo: 'mock-leader-1', startTime: '2026-07-20T08:00:00Z', location: 'Sảnh Hera', status: 'COMPLETED', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Khảo sát hiện trường', assigneeName: 'Vũ Hoàng Long' },
-  { planId: 'plan-2', planCode: 'KH-002', orderId: 'DD0001', taskId: 'task-setup', assignedTo: 'mock-tech-1', startTime: '2026-08-14T07:00:00Z', location: 'Sảnh Hera', status: 'CONFIRMED', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Thi công lắp đặt', assigneeName: 'Lê Minh Dũng' },
-  { planId: 'plan-3', planCode: 'KH-003', orderId: 'DD0003', taskId: 'task-survey', assignedTo: 'mock-leader-2', startTime: '2026-07-15T08:00:00Z', location: 'Sảnh Zeus', status: 'COMPLETED', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Khảo sát hiện trường', assigneeName: 'Nguyễn Thị Hương' },
-  { planId: 'plan-4', planCode: 'KH-004', orderId: 'DD0003', taskId: 'task-setup', assignedTo: 'mock-tech-2', startTime: '2026-07-24T07:00:00Z', location: 'Sảnh Zeus', status: 'IN_PROGRESS', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Thi công lắp đặt', assigneeName: 'Trần Anh Tuấn' },
+  { planId: 'plan-1', planCode: 'KH-001', orderId: ORDER_A_ID, taskId: 'task-survey', assignedTo: 'mock-leader-1', startTime: '2026-07-20T08:00:00Z', location: 'Sảnh Hera', status: 'COMPLETED', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Khảo sát hiện trường', assigneeName: 'Vũ Hoàng Long' },
+  { planId: 'plan-2', planCode: 'KH-002', orderId: ORDER_A_ID, taskId: 'task-setup', assignedTo: 'mock-tech-1', startTime: '2026-08-14T07:00:00Z', location: 'Sảnh Hera', status: 'CONFIRMED', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Thi công lắp đặt', assigneeName: 'Lê Minh Dũng' },
+  { planId: 'plan-3', planCode: 'KH-003', orderId: ORDER_C_ID, taskId: 'task-survey', assignedTo: 'mock-leader-2', startTime: '2026-07-15T08:00:00Z', location: 'Sảnh Zeus', status: 'COMPLETED', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Khảo sát hiện trường', assigneeName: 'Nguyễn Thị Hương' },
+  { planId: 'plan-4', planCode: 'KH-004', orderId: ORDER_C_ID, taskId: 'task-setup', assignedTo: 'mock-tech-2', startTime: '2026-07-24T07:00:00Z', location: 'Sảnh Zeus', status: 'IN_PROGRESS', createdBy: 'mock-manager-1', createdAt: NOW, updatedAt: NOW, taskName: 'Thi công lắp đặt', assigneeName: 'Trần Anh Tuấn' },
 ];
 
 export const MOCK_SURVEY_REPORTS: SurveyReport[] = [
   {
     surveyId: 'survey-1',
     reportCode: 'KS-001',
-    orderId: 'DD0001',
+    orderId: ORDER_A_ID,
     planId: 'plan-1',
     surveyDate: '2026-07-20T08:30:00Z',
     location: 'Sảnh Hera, 12 Lê Lợi, Q1',
@@ -76,7 +90,7 @@ export const MOCK_SURVEY_REPORTS: SurveyReport[] = [
   {
     surveyId: 'survey-2',
     reportCode: 'KS-002',
-    orderId: 'DD0003',
+    orderId: ORDER_C_ID,
     planId: 'plan-3',
     surveyDate: '2026-07-15T08:30:00Z',
     location: 'Sảnh Zeus, 78 CMT8, Q3',
@@ -110,16 +124,16 @@ export const MOCK_POLICIES: BusinessPolicy[] = [
 ];
 
 export const MOCK_WAGES: WageRecord[] = [
-  { wageId: 'wage-1', wageCode: 'CL-2026-07-001', orderId: 'DD0001', userId: 'mock-leader-1', wageRole: 'LEADER', shifts: 2, wageRate: 350000, totalWage: 700000, status: 'CONFIRMED', confirmedBy: 'mock-manager-1', confirmedAt: '2026-08-15T09:00:00Z', notes: 'Phụ trách khảo sát + thi công đơn DD0001', createdAt: NOW, updatedAt: NOW },
-  { wageId: 'wage-2', wageCode: 'CL-2026-07-002', orderId: 'DD0001', userId: 'mock-tech-1', wageRole: 'SETUP', shifts: 1, wageRate: 250000, totalWage: 250000, status: 'PENDING', notes: 'Leader đã xác nhận điểm danh, chờ Manager duyệt lương', createdAt: NOW, updatedAt: NOW },
-  { wageId: 'wage-3', wageCode: 'CL-2026-07-003', orderId: 'DD0003', userId: 'mock-leader-2', wageRole: 'LEADER', shifts: 2, wageRate: 350000, totalWage: 700000, status: 'PAID', confirmedBy: 'mock-manager-1', confirmedAt: '2026-07-25T09:00:00Z', createdAt: NOW, updatedAt: NOW },
-  { wageId: 'wage-4', wageCode: 'CL-2026-07-004', orderId: 'DD0003', userId: 'mock-tech-2', wageRole: 'SOUND', shifts: 1, wageRate: 250000, totalWage: 250000, status: 'DRAFT', notes: 'Technical Staff mới check-in, chưa được Leader xác nhận', createdAt: NOW, updatedAt: NOW },
+  { wageId: 'wage-1', wageCode: 'CL-2026-07-001', orderId: ORDER_A_ID, userId: 'mock-leader-1', wageRole: 'LEADER', shifts: 2, wageRate: 350000, totalWage: 700000, status: 'CONFIRMED', confirmedBy: 'mock-manager-1', confirmedAt: '2026-08-15T09:00:00Z', notes: `Phụ trách khảo sát + thi công đơn ${ORDER_A_ID}`, createdAt: NOW, updatedAt: NOW },
+  { wageId: 'wage-2', wageCode: 'CL-2026-07-002', orderId: ORDER_A_ID, userId: 'mock-tech-1', wageRole: 'SETUP', shifts: 1, wageRate: 250000, totalWage: 250000, status: 'PENDING', notes: 'Leader đã xác nhận điểm danh, chờ Manager duyệt lương', createdAt: NOW, updatedAt: NOW },
+  { wageId: 'wage-3', wageCode: 'CL-2026-07-003', orderId: ORDER_C_ID, userId: 'mock-leader-2', wageRole: 'LEADER', shifts: 2, wageRate: 350000, totalWage: 700000, status: 'PAID', confirmedBy: 'mock-manager-1', confirmedAt: '2026-07-25T09:00:00Z', createdAt: NOW, updatedAt: NOW },
+  { wageId: 'wage-4', wageCode: 'CL-2026-07-004', orderId: ORDER_C_ID, userId: 'mock-tech-2', wageRole: 'SOUND', shifts: 1, wageRate: 250000, totalWage: 250000, status: 'DRAFT', notes: 'Technical Staff mới check-in, chưa được Leader xác nhận', createdAt: NOW, updatedAt: NOW },
 ];
 
 export const MOCK_ORDER_WARNINGS: OrderWarning[] = [
-  { warningId: 'warn-1', orderId: 'DD0001', content: 'Thiếu 2 ghế Tiffany trắng so với hạng mục đã chốt trong báo giá.', isResolved: false, createdAt: '2026-07-18T10:00:00Z' },
-  { warningId: 'warn-2', orderId: 'DD0001', content: 'Khách yêu cầu đổi giờ thi công sớm hơn 1 tiếng, cần xác nhận lại với đội thi công.', isResolved: true, resolvedBy: 'mock-manager-1', resolvedAt: '2026-07-19T08:00:00Z', createdAt: '2026-07-18T15:00:00Z' },
-  { warningId: 'warn-3', orderId: 'DD0003', content: 'Nhà cung cấp Hoàng Duy Audio báo trễ 1 ngày so với lịch giao thiết bị âm thanh.', isResolved: false, createdAt: '2026-07-16T11:00:00Z' },
+  { warningId: 'warn-1', orderId: ORDER_A_ID, content: 'Thiếu 2 ghế Tiffany trắng so với hạng mục đã chốt trong báo giá.', isResolved: false, createdAt: '2026-07-18T10:00:00Z' },
+  { warningId: 'warn-2', orderId: ORDER_A_ID, content: 'Khách yêu cầu đổi giờ thi công sớm hơn 1 tiếng, cần xác nhận lại với đội thi công.', isResolved: true, resolvedBy: 'mock-manager-1', resolvedAt: '2026-07-19T08:00:00Z', createdAt: '2026-07-18T15:00:00Z' },
+  { warningId: 'warn-3', orderId: ORDER_C_ID, content: `Nhà cung cấp ${SUPPLIER_3.supplierName} báo trễ 1 ngày so với lịch giao thiết bị âm thanh.`, isResolved: false, createdAt: '2026-07-16T11:00:00Z' },
 ];
 
 export const MOCK_EVIDENCE: Evidence[] = [
@@ -130,7 +144,7 @@ export const MOCK_EVIDENCE: Evidence[] = [
 
 export const MOCK_SUPPLIER_TRANSACTIONS: SupplierTransaction[] = [
   {
-    transactionId: 'st-1', transactionCode: 'PT-2026-001', supplierId: 'sup-1', supplierName: 'Ánh Sáng Pro', orderId: 'DD0001',
+    transactionId: 'st-1', transactionCode: 'PT-2026-001', supplierId: SUPPLIER_1.supplierId, supplierName: SUPPLIER_1.supplierName, orderId: ORDER_A_ID,
     transactionType: 'RENTAL', serviceTitle: 'Thuê dàn âm thanh ánh sáng sân khấu chính', estimatedCost: 12_500_000, depositAmount: 5_000_000,
     paymentStatus: 'DEPOSITED', status: 'APPROVED',
     items: [
@@ -140,14 +154,14 @@ export const MOCK_SUPPLIER_TRANSACTIONS: SupplierTransaction[] = [
     createdAt: NOW, updatedAt: NOW,
   },
   {
-    transactionId: 'st-2', transactionCode: 'PT-2026-002', supplierId: 'sup-3', supplierName: 'Hoàng Duy Audio', orderId: 'DD0003',
+    transactionId: 'st-2', transactionCode: 'PT-2026-002', supplierId: SUPPLIER_3.supplierId, supplierName: SUPPLIER_3.supplierName, orderId: ORDER_C_ID,
     transactionType: 'RENTAL', serviceTitle: 'Thuê hệ thống âm thanh biểu diễn ngoài trời', estimatedCost: 6_000_000, depositAmount: 0,
     paymentStatus: 'UNPAID', status: 'PENDING',
     items: [{ stItemId: 'sti-3', itemName: 'Hệ thống âm thanh biểu diễn ngoài trời', quantity: 1, unitCost: 6_000_000, subtotal: 6_000_000, receivedQuantity: 0 }],
     createdAt: NOW, updatedAt: NOW,
   },
   {
-    transactionId: 'st-3', transactionCode: 'PT-2026-003', supplierId: 'sup-5', supplierName: 'Minh Phát Flowers', orderId: 'DD0001',
+    transactionId: 'st-3', transactionCode: 'PT-2026-003', supplierId: SUPPLIER_5.supplierId, supplierName: SUPPLIER_5.supplierName, orderId: ORDER_A_ID,
     transactionType: 'PURCHASE', serviceTitle: 'Mua hoa tươi trang trí phông nền', estimatedCost: 3_200_000, depositAmount: 3_200_000,
     paymentStatus: 'PAID', status: 'COMPLETED',
     items: [{ stItemId: 'sti-4', itemName: 'Hoa lan hồ điệp trang trí phông nền', quantity: 20, unitCost: 160_000, subtotal: 3_200_000, receivedQuantity: 20 }],

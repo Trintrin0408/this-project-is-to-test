@@ -17,6 +17,12 @@ export interface MockStore<T> {
 
 const STORAGE_PREFIX = 'bnwems_mock_db_';
 
+/** "Hôm nay" cố định của toàn bộ hệ mock — PHẢI khớp giá trị hardcode ở generateMockOrders()
+ * (db/orders.ts) và mọi nơi khác từng tự định nghĩa hằng số này. Không dùng `new Date()` thật của
+ * trình duyệt cho bất kỳ phép tính ngày nào trong mock (cảnh báo sự kiện sắp diễn ra, doanh thu
+ * theo tháng...). */
+export const REFERENCE_TODAY = '2026-07-10';
+
 function loadFromStorage<T>(key: string, fallback: T[]): T[] {
   if (typeof window === 'undefined') return fallback;
   try {

@@ -53,6 +53,11 @@ export interface PlanWorkTask {
   location: string;
   requirements: string;
   status: TaskStatus;
+  /** Giờ THẬT bắt đầu làm việc (HH:mm, ghi lúc bấm "Bắt đầu làm việc") — khác `startTime` vốn chỉ là
+   * giờ dự kiến trong kế hoạch. */
+  actualStartTime?: string;
+  /** Giờ THẬT hoàn thành (HH:mm, ghi lúc xác nhận hoàn thành kèm ảnh minh chứng). */
+  actualEndTime?: string;
   /** Ảnh thi công do nhân sự tải lên để xác nhận công việc đã hoàn thành (chỉ lưu tạm qua object URL
    * của trình duyệt — mất khi tải lại trang, xem giải thích chung của file này). */
   evidencePhotoName?: string;
@@ -136,7 +141,7 @@ function generateMockPlans(): SchedulePlan[] {
         assignee: staffList[i % staffList.length].name,
         team: staffList.filter((_, si) => si !== i % staffList.length).map((s) => s.name),
         startTime: `${activityDate} ${8 + i * 3}:00`,
-        location: `Riverside Palace (${order.venue})`,
+        location: order.venue,
         requirements: 'Chuẩn bị đầy đủ thiết bị theo danh sách hạng mục đã duyệt trong báo giá.',
         status: statusPool[(index + i) % statusPool.length],
       };
@@ -148,7 +153,7 @@ function generateMockPlans(): SchedulePlan[] {
       customerName: order.customerName,
       eventName: `Lễ cưới ${order.customerName}`,
       eventDate: order.weddingDate,
-      location: `Riverside Palace (${order.venue})`,
+      location: order.venue,
       manager: order.coordinatorName,
       notes: index % 3 === 0 ? 'Ưu tiên hoàn tất lắp đặt trước 22h, tránh ảnh hưởng khu vực lân cận.' : '',
       status: index % 5 === 0 ? 'DRAFT' : 'CONFIRMED',
@@ -159,7 +164,7 @@ function generateMockPlans(): SchedulePlan[] {
           date: addDays(new Date(activityDate), -1),
           startTime: '23:00',
           endTime: '02:00',
-          location: `Riverside Palace (${order.venue})`,
+          location: order.venue,
           notes: 'Lắp dựng kết cấu thô, sân khấu và backdrop chính.',
         },
         {
@@ -168,7 +173,7 @@ function generateMockPlans(): SchedulePlan[] {
           date: addDays(new Date(activityDate), 1),
           startTime: '08:00',
           endTime: '11:00',
-          location: `Riverside Palace (${order.venue})`,
+          location: order.venue,
           notes: 'Thu hồi thiết bị, sân khấu và backdrop sau tiệc, kiểm đếm trước khi nhập kho.',
         },
       ],
@@ -197,14 +202,38 @@ export function deleteAdminSchedulePlan(id: string): void {
   store = store.filter((p) => p.id !== id);
 }
 
-/** Gắn ảnh thi công minh chứng cho 1 công việc kỹ thuật và tự đánh dấu công việc đó Hoàn thành. */
+function nowTime(): string {
+  return new Date().toTimeString().slice(0, 5);
+}
+
+/** Đánh dấu 1 công việc kỹ thuật là ĐANG LÀM (bấm "Bắt đầu làm việc") — ghi giờ bắt đầu thật, khác
+ * `startTime` vốn chỉ là giờ dự kiến trong kế hoạch. */
+export function startAdminScheduleTask(planId: string, taskId: string): void {
+  store = store.map((p) =>
+    p.id === planId
+      ? { ...p, tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, status: 'IN_PROGRESS', actualStartTime: t.actualStartTime ?? nowTime() } : t)) }
+      : p,
+  );
+}
+
+/** Gắn ảnh thi công minh chứng cho 1 công việc kỹ thuật và tự đánh dấu công việc đó Hoàn thành — ghi
+ * kèm giờ hoàn thành thật (và giờ bắt đầu thật nếu công việc chưa từng bấm "Bắt đầu làm việc"). */
 export function confirmAdminScheduleTaskWithEvidence(planId: string, taskId: string, evidence: { fileName: string; previewUrl: string }): void {
   store = store.map((p) =>
     p.id === planId
       ? {
           ...p,
           tasks: p.tasks.map((t) =>
-            t.id === taskId ? { ...t, status: 'COMPLETED', evidencePhotoName: evidence.fileName, evidencePhotoUrl: evidence.previewUrl } : t,
+            t.id === taskId
+              ? {
+                  ...t,
+                  status: 'COMPLETED',
+                  actualStartTime: t.actualStartTime ?? nowTime(),
+                  actualEndTime: nowTime(),
+                  evidencePhotoName: evidence.fileName,
+                  evidencePhotoUrl: evidence.previewUrl,
+                }
+              : t,
           ),
         }
       : p,
@@ -267,7 +296,7 @@ export function getUnplannedOrders(currentPlanId?: string) {
       customerName: o.customerName,
       eventName: `Lễ cưới ${o.customerName}`,
       eventDate: o.weddingDate,
-      location: `Riverside Palace (${o.venue})`,
+      location: o.venue,
       coordinatorName: o.coordinatorName,
     }));
 }

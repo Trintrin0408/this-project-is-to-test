@@ -485,3 +485,169 @@ export function getCatalogItemsAsApiItems(): Item[] {
 // Snapshot tại thời điểm module được load (đúng hành vi cũ của catalogMocks.MOCK_ITEMS — 3/4 nơi dùng
 // hằng số này vốn đã chỉ đọc 1 lần lúc mount/module-eval, không phản ứng lại theo thời gian thực).
 export const MOCK_ITEMS: Item[] = getCatalogItemsAsApiItems();
+
+// ===== Business Service Package (trang /admin/catalog/business-services, "Dịch vụ doanh nghiệp") —
+// gộp vào đây từ src/mocks/businessServicesMock.ts (đã xóa) theo Task "System Testing" audit 2b-6.
+// Đây là gói dịch vụ TRỌN GÓI bán cho khách doanh nghiệp (tiệc tất niên, hội nghị, team building...),
+// khác bản chất với AdminEquipment (thiết bị cho thuê lẻ theo đơn vị/tồn kho) — không ép chung 1 type,
+// KHÔNG dùng chung EQUIPMENT_CATEGORY_OPTIONS (loại thiết bị vật lý, vd "Bàn ghế") vì hệ phân loại theo
+// use-case sự kiện doanh nghiệp (vd "Hội nghị", "Team Building") là khái niệm khác hẳn, ép chung sẽ sai
+// nghĩa. Điểm được gộp thật: sống trong CÙNG 1 file/thư mục db/ (nguồn dữ liệu duy nhất của toàn app)
+// thay vì đứng riêng ngoài src/mocks/ như trước — nhất quán với mọi domain catalog khác.
+
+export type BusinessServiceStatus = 'active' | 'paused' | 'stopped';
+
+export const BUSINESS_SERVICE_STATUS_META: Record<BusinessServiceStatus, { label: string; variant: BadgeVariant }> = {
+  active: { label: 'Đang cung cấp', variant: 'success' },
+  paused: { label: 'Tạm ngừng', variant: 'warning' },
+  stopped: { label: 'Ngừng cung cấp', variant: 'error' },
+};
+
+export const BUSINESS_SERVICE_CATEGORY_OPTIONS = [
+  'Tiệc & Sự kiện', 'Hội nghị', 'Team Building', 'Trang trí', 'Ẩm thực', 'Nghỉ dưỡng',
+];
+
+export interface BusinessServicePackage {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  shortDescription: string;
+  detailDescription: string;
+  priceFrom: number;
+  status: BusinessServiceStatus;
+  imageUrl: string;
+  updatedAt: string; // YYYY-MM-DD
+}
+
+function addDaysStr(base: Date, days: number): string {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+const BUSINESS_SERVICE_IMAGE_POOL = [
+  'https://images.unsplash.com/photo-1511578314322-379afb47686e?w=200&h=200&fit=crop',
+  'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=200&h=200&fit=crop',
+  'https://images.unsplash.com/photo-1519671482749-fd09be7ccebf?w=200&h=200&fit=crop',
+  'https://images.unsplash.com/photo-1552664730-d307ca884978?w=200&h=200&fit=crop',
+  'https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=200&h=200&fit=crop',
+  'https://images.unsplash.com/photo-1505373877841-8d25f7d46678?w=200&h=200&fit=crop',
+];
+
+const EXTRA_BUSINESS_SERVICE_POOL = [
+  { name: 'Gói Tiệc Cuối Năm Doanh Nghiệp', category: 'Tiệc & Sự kiện', code: 'BIZ-YEAREND', desc: 'Tổ chức tiệc tất niên trọn gói, sân khấu ánh sáng chuyên nghiệp.' },
+  { name: 'Gói Hội Thảo Ra Mắt Sản Phẩm', category: 'Hội nghị', code: 'BIZ-LAUNCH', desc: 'Không gian ra mắt sản phẩm, hệ thống trình chiếu và âm thanh cao cấp.' },
+  { name: 'Gói Du Lịch Kết Hợp Team Building', category: 'Team Building', code: 'BIZ-TRIP', desc: 'Kết hợp nghỉ dưỡng và hoạt động gắn kết đội nhóm ngoài trời.' },
+  { name: 'Gói Trang Trí Sảnh Hội Nghị', category: 'Trang trí', code: 'BIZ-DECOR-HN', desc: 'Trang trí sảnh theo bộ nhận diện thương hiệu doanh nghiệp.' },
+  { name: 'Gói Ẩm Thực Buffet Doanh Nghiệp', category: 'Ẩm thực', code: 'BIZ-BUFFET', desc: 'Thực đơn buffet đa dạng phục vụ số lượng lớn khách mời.' },
+  { name: 'Gói Nghỉ Dưỡng Cuối Tuần', category: 'Nghỉ dưỡng', code: 'BIZ-RETREAT', desc: 'Chương trình nghỉ dưỡng kết hợp workshop nội bộ cho doanh nghiệp.' },
+  { name: 'Gói Hội Nghị Khách Hàng', category: 'Hội nghị', code: 'BIZ-CLIENT', desc: 'Tổ chức hội nghị tri ân, chăm sóc khách hàng thân thiết.' },
+  { name: 'Gói Tiệc Kỷ Niệm Thành Lập', category: 'Tiệc & Sự kiện', code: 'BIZ-ANNIV', desc: 'Tổ chức lễ kỷ niệm thành lập công ty quy mô lớn.' },
+];
+
+function generateMockBusinessServices(): BusinessServicePackage[] {
+  const today = new Date('2026-07-10');
+
+  const seeded: BusinessServicePackage[] = [
+    {
+      id: 'biz-1',
+      code: 'BIZ-PREMIUM',
+      name: 'Gói Tiệc Doanh Nghiệp Premium',
+      category: 'Tiệc & Sự kiện',
+      shortDescription: 'Gói tiệc cao cấp dành cho sự kiện doanh nghiệp. Quy mô từ 100 - 500 khách.',
+      detailDescription: 'Gói tiệc cao cấp dành cho sự kiện doanh nghiệp, bao gồm thực đơn cao cấp, sân khấu, âm thanh ánh sáng chuyên nghiệp. Quy mô phục vụ từ 100 đến 500 khách.',
+      priceFrom: 450_000,
+      status: 'active',
+      imageUrl: BUSINESS_SERVICE_IMAGE_POOL[0],
+      updatedAt: addDaysStr(today, -2),
+    },
+    {
+      id: 'biz-2',
+      code: 'BIZ-CONFERENCE',
+      name: 'Gói Hội Nghị Toàn Diện',
+      category: 'Hội nghị',
+      shortDescription: 'Dịch vụ tổ chức hội nghị, hội thảo trọn gói bao gồm thiết bị và nhân sự.',
+      detailDescription: 'Dịch vụ tổ chức hội nghị, hội thảo trọn gói bao gồm thiết bị trình chiếu, âm thanh, và nhân sự hỗ trợ chuyên nghiệp trong suốt sự kiện.',
+      priceFrom: 320_000,
+      status: 'active',
+      imageUrl: BUSINESS_SERVICE_IMAGE_POOL[2],
+      updatedAt: addDaysStr(today, -3),
+    },
+    {
+      id: 'biz-3',
+      code: 'BIZ-TEAMBUILD',
+      name: 'Gói Team Building',
+      category: 'Team Building',
+      shortDescription: 'Chương trình team building sáng tạo kết hợp du lịch và gala dinner.',
+      detailDescription: 'Chương trình team building sáng tạo kết hợp các hoạt động du lịch trải nghiệm và tiệc gala dinner khép lại chương trình.',
+      priceFrom: 280_000,
+      status: 'paused',
+      imageUrl: BUSINESS_SERVICE_IMAGE_POOL[3],
+      updatedAt: addDaysStr(today, -5),
+    },
+    {
+      id: 'biz-4',
+      code: 'BIZ-DECOR',
+      name: 'Gói Trang Trí Doanh Nghiệp',
+      category: 'Trang trí',
+      shortDescription: 'Trang trí sân khấu, không gian sự kiện theo nhận diện thương hiệu.',
+      detailDescription: 'Trang trí sân khấu, không gian sự kiện theo đúng bộ nhận diện thương hiệu (màu sắc, logo, backdrop) của doanh nghiệp.',
+      priceFrom: 150_000,
+      status: 'active',
+      imageUrl: BUSINESS_SERVICE_IMAGE_POOL[4],
+      updatedAt: addDaysStr(today, -7),
+    },
+  ];
+
+  // 18 đang cung cấp / 4 tạm ngừng / 2 ngừng cung cấp trên tổng 24 dịch vụ — đã dùng 3 active + 1
+  // paused ở 4 dòng seed phía trên, phần còn lại (20 dòng) cần thêm 15 active + 3 paused + 2 stopped.
+  const remainingStatuses: BusinessServiceStatus[] = [
+    ...Array(15).fill('active'),
+    ...Array(3).fill('paused'),
+    ...Array(2).fill('stopped'),
+  ];
+
+  const generated: BusinessServicePackage[] = remainingStatuses.map((status, i) => {
+    const base = EXTRA_BUSINESS_SERVICE_POOL[i % EXTRA_BUSINESS_SERVICE_POOL.length];
+    const suffix = Math.floor(i / EXTRA_BUSINESS_SERVICE_POOL.length) + 1;
+    return {
+      id: `biz-${seeded.length + i + 1}`,
+      code: suffix > 1 ? `${base.code}-${suffix}` : base.code,
+      name: suffix > 1 ? `${base.name} ${suffix}` : base.name,
+      category: base.category,
+      shortDescription: base.desc,
+      detailDescription: base.desc,
+      priceFrom: 120_000 + ((i * 35_000) % 400_000),
+      status,
+      imageUrl: BUSINESS_SERVICE_IMAGE_POOL[i % BUSINESS_SERVICE_IMAGE_POOL.length],
+      updatedAt: addDaysStr(today, -(8 + i * 3)),
+    };
+  });
+
+  return [...seeded, ...generated];
+}
+
+let businessServiceStore: BusinessServicePackage[] = generateMockBusinessServices();
+
+export function getBusinessServices(): BusinessServicePackage[] {
+  return businessServiceStore;
+}
+
+export function addBusinessService(service: BusinessServicePackage): void {
+  businessServiceStore = [service, ...businessServiceStore];
+}
+
+export function updateBusinessService(id: string, patch: Partial<BusinessServicePackage>): void {
+  businessServiceStore = businessServiceStore.map((s) => (s.id === id ? { ...s, ...patch } : s));
+}
+
+export function deleteBusinessService(id: string): void {
+  businessServiceStore = businessServiceStore.filter((s) => s.id !== id);
+}
+
+export function nextBusinessServiceCode(): string {
+  const year = 25;
+  const seq = 20 + (businessServiceStore.length % 80);
+  return `BIZ-${year}${seq}`;
+}

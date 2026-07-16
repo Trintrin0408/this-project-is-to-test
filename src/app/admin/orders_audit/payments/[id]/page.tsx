@@ -100,6 +100,17 @@ export default function OrderPaymentDetailPage() {
   const transferContent = getDepositTransferContent(order, order.orderCode);
   const paidAmount = order.settlementStatus === 'SETTLED' ? order.totalValue : order.depositStatus === 'RECEIVED' ? order.depositAmount : 0;
   const remainingAmount = order.totalValue - paidAmount;
+  // Chỉ cho phép quyết toán khi đơn đã bước vào thi công (khớp đúng điều kiện Mốc 5 ở trang chi tiết
+  // đơn hàng, admin/orders_audit/[id] & manager/orders/[id]) — trước đây màn này chỉ cần đã đóng cọc
+  // là bấm được "Xác nhận đã quyết toán", kể cả khi đơn còn ở trạng thái Mới, chưa hề thi công.
+  const isOrderExecutionEligible = order.orderStatus === 'IN_PROGRESS' || order.orderStatus === 'COMPLETED';
+  const canConfirmSettlement = order.depositStatus === 'RECEIVED' && isOrderExecutionEligible;
+  let settlementBlockedMessage = 'Đơn hàng đã đóng cọc, chờ hoàn tất thi công/thu hồi trước khi quyết toán cuối kỳ.';
+  if (order.depositStatus !== 'RECEIVED') {
+    settlementBlockedMessage = 'Đơn hàng chưa đóng cọc — cần xác nhận cọc trước khi quyết toán cuối kỳ.';
+  } else if (!isOrderExecutionEligible) {
+    settlementBlockedMessage = 'Đơn hàng đã đóng cọc nhưng chưa bắt đầu thi công — cần hoàn tất thi công/thu hồi trước khi quyết toán cuối kỳ.';
+  }
 
   const refresh = () => setOrder(getOrderPaymentViewById(order.orderId));
 
@@ -441,12 +452,8 @@ export default function OrderPaymentDetailPage() {
             </div>
           ) : (
             <div className="mt-4">
-              <p className="text-sm text-slate-500">
-                {order.depositStatus === 'RECEIVED'
-                  ? 'Đơn hàng đã đóng cọc, chờ hoàn tất thi công/thu hồi trước khi quyết toán cuối kỳ.'
-                  : 'Đơn hàng chưa đóng cọc — cần xác nhận cọc trước khi quyết toán cuối kỳ.'}
-              </p>
-              {order.depositStatus === 'RECEIVED' && (
+              <p className="text-sm text-slate-500">{settlementBlockedMessage}</p>
+              {canConfirmSettlement && (
                 <div className="mt-4 flex justify-end">
                   <Button onClick={handleConfirmSettlement}>Xác nhận đã quyết toán</Button>
                 </div>

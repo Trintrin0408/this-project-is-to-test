@@ -13,6 +13,7 @@ import {
   SupplierServiceStatus,
   nextSupplierServiceCode,
 } from '@/mocks/supplierServicesMock';
+import { getAdminSuppliers } from '@/mocks/db/suppliers';
 
 interface SupplierServiceFormModalProps {
   isOpen: boolean;
@@ -26,12 +27,13 @@ const textareaClassName =
 
 const fieldLabelClassName = 'text-[11px] font-semibold uppercase tracking-wide text-slate-500';
 
-function emptyValues(): Omit<SupplierServicePackage, 'id' | 'updatedAt'> {
+function emptyValues(firstSupplierId: string, firstSupplierName: string, firstSupplierPhone: string): Omit<SupplierServicePackage, 'id' | 'updatedAt'> {
   return {
     code: nextSupplierServiceCode(),
     name: '',
-    supplierName: '',
-    supplierPhone: '',
+    supplierId: firstSupplierId,
+    supplierName: firstSupplierName,
+    supplierPhone: firstSupplierPhone,
     category: SUPPLIER_SERVICE_CATEGORY_OPTIONS[0],
     unit: SUPPLIER_SERVICE_UNIT_OPTIONS[0],
     referencePrice: 0,
@@ -42,7 +44,8 @@ function emptyValues(): Omit<SupplierServicePackage, 'id' | 'updatedAt'> {
 }
 
 export function SupplierServiceFormModal({ isOpen, onClose, editingService, onSubmit }: Readonly<SupplierServiceFormModalProps>) {
-  const [values, setValues] = useState(emptyValues);
+  const suppliers = getAdminSuppliers();
+  const [values, setValues] = useState(() => emptyValues(suppliers[0]?.supplierId ?? '', suppliers[0]?.supplierName ?? '', suppliers[0]?.phone ?? ''));
   const [wasOpen, setWasOpen] = useState(isOpen);
 
   if (isOpen !== wasOpen) {
@@ -53,6 +56,7 @@ export function SupplierServiceFormModal({ isOpen, onClose, editingService, onSu
           ? {
               code: editingService.code,
               name: editingService.name,
+              supplierId: editingService.supplierId,
               supplierName: editingService.supplierName,
               supplierPhone: editingService.supplierPhone,
               category: editingService.category,
@@ -62,13 +66,18 @@ export function SupplierServiceFormModal({ isOpen, onClose, editingService, onSu
               imageUrl: editingService.imageUrl,
               description: editingService.description,
             }
-          : emptyValues(),
+          : emptyValues(suppliers[0]?.supplierId ?? '', suppliers[0]?.supplierName ?? '', suppliers[0]?.phone ?? ''),
       );
     }
   }
 
+  const handleSelectSupplier = (supplierId: string) => {
+    const supplier = suppliers.find((s) => s.supplierId === supplierId);
+    setValues((v) => ({ ...v, supplierId, supplierName: supplier?.supplierName ?? '', supplierPhone: supplier?.phone ?? '' }));
+  };
+
   const handleSubmit = () => {
-    if (!values.code.trim() || !values.name.trim() || !values.supplierName.trim()) return;
+    if (!values.code.trim() || !values.name.trim() || !values.supplierId) return;
     onSubmit(values);
   };
 
@@ -128,23 +137,18 @@ export function SupplierServiceFormModal({ isOpen, onClose, editingService, onSu
             <label className={fieldLabelClassName} htmlFor="ncc-supplier">
               Nhà cung cấp *
             </label>
-            <Input
+            <Select
               id="ncc-supplier"
-              placeholder="Tên nhà cung cấp"
-              value={values.supplierName}
-              onChange={(e) => setValues((v) => ({ ...v, supplierName: e.target.value }))}
+              value={values.supplierId}
+              onChange={(e) => handleSelectSupplier(e.target.value)}
+              options={suppliers.map((s) => ({ value: s.supplierId, label: s.supplierName }))}
             />
           </div>
           <div className="flex flex-col gap-1">
             <label className={fieldLabelClassName} htmlFor="ncc-supplier-phone">
               Số điện thoại NCC
             </label>
-            <Input
-              id="ncc-supplier-phone"
-              placeholder="09xx xxx xxx"
-              value={values.supplierPhone}
-              onChange={(e) => setValues((v) => ({ ...v, supplierPhone: e.target.value }))}
-            />
+            <Input id="ncc-supplier-phone" value={values.supplierPhone} disabled readOnly />
           </div>
         </div>
 

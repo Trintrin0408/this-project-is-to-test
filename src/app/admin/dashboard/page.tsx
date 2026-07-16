@@ -41,6 +41,7 @@ export default function Page() {
       iconColor: 'blue',
       changeLabel: `${kpis.monthlyRevenueChange} so với tháng trước`,
       changeDirection: 'up',
+      href: '/admin/reports/revenue',
     },
     {
       label: 'Đơn đặt mới',
@@ -49,6 +50,7 @@ export default function Page() {
       iconColor: 'green',
       changeLabel: `${kpis.newOrdersChange} so với tháng trước`,
       changeDirection: 'up',
+      href: '/admin/orders_audit',
     },
     {
       label: 'Báo giá chờ duyệt',
@@ -57,6 +59,7 @@ export default function Page() {
       iconColor: 'amber',
       changeLabel: `${kpis.pendingQuotationsChange} so với tháng trước`,
       changeDirection: 'up',
+      href: '/admin/quotations',
     },
     {
       label: 'Khách hàng mới',
@@ -65,6 +68,7 @@ export default function Page() {
       iconColor: 'pink',
       changeLabel: `${kpis.newCustomersChange} so với tháng trước`,
       changeDirection: 'up',
+      href: '/admin/customers',
     },
   ];
 
