@@ -6,13 +6,14 @@ import { CheckCircle2, DollarSign, Package, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { formatCurrency } from '@/utils/formatCurrency';
 import {
   AdminSurveyReport,
   SURVEY_ASSIGNEE_OPTIONS,
-  SURVEY_TARGET_ORDERS,
   SurveyQuoteItem,
   SurveyRentalItem,
+  getSurveyScheduledTargets,
   nextAdminSurveyReportId,
 } from '@/mocks/db';
 
@@ -41,7 +42,10 @@ function defaultEventDate(): string {
 }
 
 export default function SurveyCreateDrawer({ isOpen, onClose, onSubmit }: Readonly<SurveyCreateDrawerProps>) {
-  const [orderId, setOrderId] = useState(SURVEY_TARGET_ORDERS[0].id);
+  // Tính lại mỗi lần render (không phải constant module-scope) để phản ánh đúng kế hoạch khảo sát mới
+  // lập qua "Kế hoạch & phân công" ngay trong cùng phiên, không cần tải lại trang mới thấy.
+  const surveyTargets = getSurveyScheduledTargets();
+  const [orderId, setOrderId] = useState(surveyTargets[0]?.id ?? '');
   const [surveyDate, setSurveyDate] = useState(todayIso());
   const [eventDate, setEventDate] = useState(defaultEventDate());
   const [assignee, setAssignee] = useState(SURVEY_ASSIGNEE_OPTIONS[0]);
@@ -67,10 +71,10 @@ export default function SurveyCreateDrawer({ isOpen, onClose, onSubmit }: Readon
   const [customQuoteQty, setCustomQuoteQty] = useState(1);
   const [customQuotePrice, setCustomQuotePrice] = useState(500_000);
 
-  const selectedOrder = SURVEY_TARGET_ORDERS.find((o) => o.id === orderId) ?? SURVEY_TARGET_ORDERS[0];
+  const selectedOrder = surveyTargets.find((o) => o.id === orderId) ?? surveyTargets[0];
 
   const resetForm = () => {
-    setOrderId(SURVEY_TARGET_ORDERS[0].id);
+    setOrderId(surveyTargets[0]?.id ?? '');
     setSurveyDate(todayIso());
     setEventDate(defaultEventDate());
     setAssignee(SURVEY_ASSIGNEE_OPTIONS[0]);
@@ -103,7 +107,7 @@ export default function SurveyCreateDrawer({ isOpen, onClose, onSubmit }: Readon
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (!content.trim() || !selectedOrder) return;
 
     const newReport: AdminSurveyReport = {
       id: nextAdminSurveyReportId(),
@@ -161,26 +165,33 @@ export default function SurveyCreateDrawer({ isOpen, onClose, onSubmit }: Readon
               Thông tin đơn đặt &amp; khách hàng
             </h4>
             <div className="grid grid-cols-2 gap-3">
-              <Select
-                label="Mã đơn đặt mục tiêu"
+              <SearchableSelect
+                label="Mã đơn đặt &amp; báo giá"
                 value={orderId}
-                onChange={(e) => setOrderId(e.target.value)}
-                options={SURVEY_TARGET_ORDERS.map((o) => ({ value: o.id, label: `${o.id} (${o.customerName})` }))}
+                onChange={setOrderId}
+                searchPlaceholder="Tìm theo mã đơn/báo giá hoặc tên khách hàng..."
+                emptyText="Không tìm thấy đơn đặt/báo giá đã có lịch khảo sát."
+                options={surveyTargets.map((o) => ({ value: o.id, label: `${o.id} (${o.customerName})` }))}
               />
               <Input label="Ngày thực hiện khảo sát" type="date" value={surveyDate} onChange={(e) => setSurveyDate(e.target.value)} />
             </div>
+            {surveyTargets.length === 0 && (
+              <p className="text-[11px] italic text-amber-600">
+                Chưa có đơn đặt hoặc báo giá nào được lên lịch khảo sát — lập lịch khảo sát ở &quot;Kế hoạch &amp; phân công&quot; trước.
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-slate-100 bg-white p-3">
               <div>
                 <span className="block text-[10px] font-semibold uppercase text-slate-400">Khách hàng</span>
-                <span className="mt-0.5 block font-bold text-slate-800">{selectedOrder.customerName}</span>
+                <span className="mt-0.5 block font-bold text-slate-800">{selectedOrder?.customerName ?? '—'}</span>
               </div>
               <div>
                 <span className="block text-[10px] font-semibold uppercase text-slate-400">Sự kiện</span>
-                <span className="mt-0.5 block font-bold text-slate-800">{selectedOrder.eventName}</span>
+                <span className="mt-0.5 block font-bold text-slate-800">{selectedOrder?.eventName ?? '—'}</span>
               </div>
               <div className="col-span-2">
                 <span className="block text-[10px] font-semibold uppercase text-slate-400">Địa điểm khảo sát</span>
-                <span className="mt-0.5 block font-semibold text-slate-700">{selectedOrder.location}</span>
+                <span className="mt-0.5 block font-semibold text-slate-700">{selectedOrder?.location ?? '—'}</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">

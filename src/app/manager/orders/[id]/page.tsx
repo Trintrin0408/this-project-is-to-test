@@ -51,7 +51,6 @@ import {
   getLinkableQuotationsForOrder,
   getOrCreateOrderPicklist,
   linkQuotationToOrder,
-  prepareAllAdminOrderItems,
   resolveAdminOrderDispute,
   unlinkQuotationFromOrder,
   updateAdminOrder,
@@ -253,11 +252,6 @@ export default function ManagerOrderDetailPage() {
     refresh();
   };
 
-  const handlePrepareAll = () => {
-    prepareAllAdminOrderItems(row.orderId, row.coordinatorName);
-    refresh();
-  };
-
   const handleItemPreparedQtyChange = (itemId: string, value: number, max: number) => {
     updateAdminOrderItem(row.orderId, itemId, { preparedQty: Math.max(0, Math.min(value, max)) });
     refresh();
@@ -341,7 +335,6 @@ export default function ManagerOrderDetailPage() {
 
   const totalItemsCount = row.items.reduce((sum, item) => sum + item.quantity, 0);
   const preparedItemsCount = row.items.reduce((sum, item) => sum + item.preparedQty, 0);
-  const isAllPrepared = totalItemsCount > 0 && preparedItemsCount >= totalItemsCount;
   const remainingAmount = row.paymentStatus === 'PAID' ? 0 : Math.max(0, row.totalPrice - (row.paymentStatus === 'DEPOSITED' ? row.depositAmount : 0));
   const currentChecklist = row.liveChecklist;
   const nearestApproachingEvent = getApproachingEventsForOrder(row.orderId, 7)[0];
@@ -710,28 +703,6 @@ export default function ManagerOrderDetailPage() {
                           </span>
                         </div>
                         <p className="text-slate-500">Giám sát bốc xếp xuất kho thiết bị và bố trí kỹ thuật viên dựng bối cảnh tại sảnh.</p>
-                        <div className="space-y-2 rounded-lg border bg-slate-50 p-3.5">
-                          <div className="flex items-center justify-between font-bold text-slate-800">
-                            <span>Tiến độ xếp kho vật tư thiết bị:</span>
-                            <span className={isAllPrepared ? 'text-emerald-600' : 'text-amber-600'}>
-                              {preparedItemsCount} / {totalItemsCount} thiết bị ({isAllPrepared ? 'Sẵn sàng xếp xe' : 'Đang xếp kho'})
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className={`h-1.5 rounded-full ${isAllPrepared ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                              style={{ width: `${totalItemsCount > 0 ? (preparedItemsCount / totalItemsCount) * 100 : 0}%` }}
-                            />
-                          </div>
-                          <div className="flex flex-wrap gap-2 border-t border-slate-200/60 pt-2">
-                            <button onClick={handlePrepareAll} className="rounded border bg-white px-2 py-1 text-[10px] font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50">
-                              Chuẩn bị nhanh 100% thiết bị
-                            </button>
-                            <button onClick={() => setActiveTab('items')} className="rounded border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100">
-                              Xem chi tiết thiết bị
-                            </button>
-                          </div>
-                        </div>
 
                         <div className="space-y-2">
                           <div className="flex items-center justify-between font-bold text-slate-700">
@@ -742,9 +713,24 @@ export default function ManagerOrderDetailPage() {
                             </button>
                           </div>
                           {linkedPlan && linkedPlan.tasks.length > 0 ? (
-                            <p className="rounded-lg border bg-slate-50 p-3 text-[10px] text-slate-600">
-                              Đã có {linkedPlan.tasks.length} công việc trong kế hoạch <strong>{linkedPlan.id}</strong>.
-                            </p>
+                            <div className="space-y-1.5 rounded-lg border bg-slate-50 p-3">
+                              {linkedPlan.tasks.map((task) => (
+                                <div key={task.id} className="flex flex-col justify-between gap-1 rounded border border-slate-100 bg-white p-2 text-[10px] sm:flex-row sm:items-center">
+                                  <div>
+                                    <p className="font-bold text-slate-800">{task.title}</p>
+                                    <p className="text-slate-500">Phụ trách: {task.assignee}</p>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    <span className={`rounded-full px-2 py-0.5 font-bold ${TASK_STATUS_META[task.status].badgeClass}`}>{TASK_STATUS_META[task.status].label}</span>
+                                    <span className="font-semibold text-slate-600">
+                                      {task.actualStartTime ? `Bắt đầu: ${task.actualStartTime}` : 'Chưa bắt đầu'}
+                                      {task.actualEndTime && ` · Hoàn thành: ${task.actualEndTime}`}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                              <p className="pt-1 text-[9px] italic text-slate-400">Giờ bắt đầu/hoàn thành thực tế do Leader Staff cập nhật tại hiện trường.</p>
+                            </div>
                           ) : (
                             <p className="rounded-lg border bg-slate-50 p-3 text-center text-[10px] italic text-slate-400">Chưa có lịch thi công kỹ thuật cụ thể cho đơn hàng này.</p>
                           )}
@@ -1046,21 +1032,6 @@ export default function ManagerOrderDetailPage() {
                           </p>
                         </div>
                       ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border bg-slate-50 p-3 text-xs">
-                    <div className="flex items-center justify-between font-bold text-slate-800">
-                      <span>Tiến độ sắp xếp kho vật tư:</span>
-                      <span className={isAllPrepared ? 'text-emerald-600' : 'text-amber-600'}>
-                        {preparedItemsCount} / {totalItemsCount} thiết bị ({isAllPrepared ? 'Sẵn sàng xếp xe' : 'Đang xếp kho'})
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className={`h-1.5 rounded-full ${isAllPrepared ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                        style={{ width: `${totalItemsCount > 0 ? (preparedItemsCount / totalItemsCount) * 100 : 0}%` }}
-                      />
                     </div>
                   </div>
 

@@ -209,9 +209,6 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
   Đã kiểm tra: `npx tsc --noEmit` sạch. Chưa có tool trình duyệt trong phiên này để chụp screenshot xác nhận trực quan — cần người dùng tự mở lại drawer, gõ "BG" và đối chiếu số lượng/mã kết quả với trang "Quản lý báo giá" để xác nhận đã khớp.
 - [X]  chưa cập nhật được trạng thái cọc
   ![1784133724359](images/DEMO_CHECKLIST/1784133724359.png)
-  **Nguyên nhân**: xác nhận cọc ở trang "Đặt cọc & thanh toán" (`admin/orders_audit/payments/[id]`, `manager/payments/deposits/[id]`) gọi `confirmDeposit()` (`src/mocks/db/payments.ts`) — hàm này chỉ cập nhật `Deposit.status` (nguồn riêng cho trang thanh toán), không đụng tới `AdminOrderRow.paymentStatus` (field trang "Đơn đặt" đọc để hiện badge "Chưa thanh toán/Đã cọc/Đã thanh toán"). Vì vậy xác nhận cọc xong ở trang thanh toán, trang "Đơn đặt" vẫn hiện "Chưa thanh toán" như cũ.
-  **Đã sửa**: `confirmDeposit()` giờ đồng bộ luôn sang `updateAdminOrder(orderId, { paymentStatus: 'DEPOSITED' })` (chỉ nâng từ `UNPAID`, không hạ ngược nếu đơn đã `PAID`) — xác nhận cọc ở "Đặt cọc & thanh toán" giờ phản ánh đúng ngay trên badge trạng thái thanh toán ở cả danh sách và chi tiết "Đơn đặt" (2 role).
-  Đã kiểm tra: `npx tsc --noEmit` sạch. Chưa có tool trình duyệt trong phiên này để chụp screenshot xác nhận trực quan.
 - [X]  Search đc khách hàng
 
   ![1784133772486](images/DEMO_CHECKLIST/1784133772486.png)
@@ -230,15 +227,15 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
 - [X]  Đơn hàng chưa có ngày kết thúc
 
   ![1784138280836](images/DEMO_CHECKLIST/1784138280836.png)
-- [X]  Ở mốc 2, Phải xác nhận 2 công việc là cọc vào khảo sát
+- [ ]  Ở mốc 2, Phải xác nhận 2 công việc là cọc vào khảo sát
 
   những đơn khi khởi tạo mà khách hàng đặt cọc luôn rồi thì xác nhận luôn là đã cọc, những đơn đc tạo khi đã khảo sát và cọc thì xác nhận luôn mốc 2
 
   ![1784138431588](images/DEMO_CHECKLIST/1784138431588.png)
-- [X]  Ở mốc 3 có cập nhật trạng thái làm việc ( bắt đầu lúc mấy giờ, hoàn thành lúc mấy giờ) và không có tiến độ sắp xếp kho vật tư
+- [ ]  Ở mốc 3 có cập nhật trạng thái làm việc ( bắt đầu lúc mấy giờ, hoàn thành lúc mấy giờ) và không có tiến độ sắp xếp kho vật tư
 
   ![1784139522919](images/DEMO_CHECKLIST/1784139522919.png)
-- [X]  Lỗi màn tạo quyết toán trong thanh toán
+- [ ]  Lỗi màn tạo quyết toán trong thanh toán
 
   ![1784138527113](images/DEMO_CHECKLIST/1784138527113.png)
 - [X]  nội dung màn change request cũng hiện ở icon chuông trên header
@@ -252,10 +249,12 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
   Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin, **điều hướng bằng click thật trong app** — không dùng `page.goto()` giữa các bước vì phát hiện `MOCK_POLICIES` là mảng in-memory thuần như `schedulePlans.ts`, reload cứng sẽ mất thay đổi vừa sửa, không phải lỗi của tính năng) — mở báo giá `bg-1` thấy đúng 4 chính sách thật (3 mốc hoàn cọc + tỉ lệ cọc chuẩn) kèm ngày hết hạn thật; sang `/admin/policies` sửa "Tỉ lệ đặt cọc tiêu chuẩn" từ 50% → 60% → quay lại đúng báo giá `bg-1` bằng điều hướng trong app → **giá trị trên báo giá cập nhật ngay thành 60%**, chứng minh liên kết dữ liệu thật (không phải 2 nguồn tách rời). Đối chiếu thêm phía Manager (`manager/quotations/bg-1`) hiển thị đúng. 0 lỗi console.
 
   ![1784140800106](images/DEMO_CHECKLIST/1784140800106.png)
-- [ ]  đây phải là tiến trình của báo giá, search đc báo giá![1784226141062](images/DEMO_CHECKLIST/1784226141062.png)
-- [ ]  xóa tiến độ sắp xếp kho vật tư. Ở mỗi đầu việc sẽ update giờ bắt đầu làm, giờ hoàn thành thực tế theo leader staff cập nhật
+- [X]  đây phải là tiến trình của báo giá, search đc báo giá![1784226141062](images/DEMO_CHECKLIST/1784226141062.png)
+- [X]  xóa tiến độ sắp xếp kho vật tư. Ở mỗi đầu việc sẽ update giờ bắt đầu làm, giờ hoàn thành thực tế theo leader staff cập nhật
 
   ![1784170593002](images/DEMO_CHECKLIST/1784170593002.png)
+  **Đã sửa**: xóa khối "Tiến độ sắp xếp kho vật tư" (thanh % + progress bar) khỏi tab "Lịch trình & Kỹ thuật" ở trang chi tiết đơn (`src/app/admin/orders_audit/[id]/page.tsx`, `src/app/manager/orders/[id]/page.tsx`) — chỉ xóa đúng bản trong tab này, giữ nguyên khối tương tự ở Mốc 3 (tab "Tiến độ sự kiện") vì không thuộc phạm vi yêu cầu. Phần "giờ bắt đầu làm/giờ hoàn thành thực tế theo Leader Staff cập nhật" ở mỗi công việc kỹ thuật bên dưới (`task.actualStartTime`/`task.actualEndTime`) đã có sẵn từ trước, không cần thêm.
+  Đã kiểm tra: `npx tsc --noEmit` và `eslint` sạch. Chưa có tool trình duyệt trong phiên này để chụp screenshot xác nhận trực quan.
 - [X]  Liên kết dữ liệu với mock data, khi click vào thì ra màn của nội dung đấy
 
   ![1784140587206](images/DEMO_CHECKLIST/1784140587206.png)

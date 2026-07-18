@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { CheckCircle2, Clock, FilePlus2, Search, XCircle } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
@@ -33,13 +34,19 @@ import {
 type StatusFilter = '' | ChangeRequestStatus;
 type TypeFilter = '' | ChangeRequestType;
 
-export default function ManagerChangeRequestsPage() {
+function ManagerChangeRequestsPageContent() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const [requests, setRequests] = useState<FieldChangeRequest[]>(() => getFieldChangeRequests());
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('PENDING');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('');
-  const [viewing, setViewing] = useState<FieldChangeRequest | null>(null);
+  // Mở sẵn modal chi tiết của đúng yêu cầu vừa bấm "Duyệt ngay"/xem từ dropdown thông báo trên Header
+  // (?id=CR-xxx) — không bắt buộc phải tự tìm lại dòng đó trong bảng nữa.
+  const prefillId = searchParams.get('id');
+  const [viewing, setViewing] = useState<FieldChangeRequest | null>(() =>
+    prefillId ? getFieldChangeRequests().find((r) => r.id === prefillId) ?? null : null,
+  );
 
   const refresh = () => setRequests(getFieldChangeRequests());
 
@@ -199,6 +206,14 @@ export default function ManagerChangeRequestsPage() {
         {viewing && <ChangeRequestDetail request={viewing} />}
       </Modal>
     </div>
+  );
+}
+
+export default function ManagerChangeRequestsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-400">Đang tải...</div>}>
+      <ManagerChangeRequestsPageContent />
+    </Suspense>
   );
 }
 

@@ -159,6 +159,15 @@ function generateMockPlans(): SchedulePlan[] {
       status: index % 5 === 0 ? 'DRAFT' : 'CONFIRMED',
       activities: [
         {
+          id: `ACT-${order.orderId}-0`,
+          type: 'Khảo sát',
+          date: addDays(new Date(activityDate), -14),
+          startTime: '09:00',
+          endTime: '10:30',
+          location: order.venue,
+          notes: 'Khảo sát mặt bằng, đo đạc thông số kỹ thuật trước khi lập báo cáo.',
+        },
+        {
           id: `ACT-${order.orderId}-1`,
           type: 'Lắp đặt',
           date: addDays(new Date(activityDate), -1),
@@ -323,4 +332,33 @@ export function getUnplannedQuotations(currentPlanId?: string) {
       location: '',
       coordinatorName: q.assignee,
     }));
+}
+
+export interface SurveyScheduleTarget {
+  /** orderId thật (DDxxxx) hoặc mã báo giá (BGxxx) khi kế hoạch này là khảo sát sớm chưa có đơn thật —
+   * khớp đúng field `orderId` của SchedulePlan (xem giải thích ở getUnplannedQuotations). */
+  id: string;
+  customerName: string;
+  eventName: string;
+  location: string;
+  surveyDate: string;
+}
+
+// Đơn đặt/báo giá đã có LỊCH khảo sát (1 hoạt động type 'Khảo sát' trong 1 SchedulePlan bất kỳ) — dùng
+// cho form "Tạo báo cáo khảo sát hiện trường" (SurveyCreateDrawer): chỉ nộp được báo cáo cho đơn/báo
+// giá đã được lên lịch khảo sát qua "Kế hoạch & phân công", không phải mọi đơn NEW như trước đây.
+export function getSurveyScheduledTargets(): SurveyScheduleTarget[] {
+  return store
+    .map((plan): SurveyScheduleTarget | undefined => {
+      const surveyActivity = plan.activities.find((a) => a.type === 'Khảo sát');
+      if (!surveyActivity) return undefined;
+      return {
+        id: plan.orderId,
+        customerName: plan.customerName,
+        eventName: plan.eventName,
+        location: surveyActivity.location || plan.location,
+        surveyDate: surveyActivity.date,
+      };
+    })
+    .filter((target): target is SurveyScheduleTarget => Boolean(target));
 }

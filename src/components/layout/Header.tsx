@@ -8,7 +8,7 @@ import { Bell, HelpCircle, Search, UserCircle, KeyRound, LogOut } from 'lucide-r
 import { useAuth } from '@/hooks/useAuth';
 import { Input } from '@/components/ui/Input';
 import { getApproachingEvents, type ApproachingEvent } from '@/mocks/db/approachingEvents';
-import { getFieldChangeRequests, CHANGE_REQUEST_TYPE_META } from '@/mocks/db/changeRequests';
+import { getFieldChangeRequests, reviewFieldChangeRequest, CHANGE_REQUEST_TYPE_META } from '@/mocks/db/changeRequests';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -25,7 +25,20 @@ export default function Header() {
   // Duyệt Change Request là việc của Manager (CLAUDE.md mục 1 — Admin không trực tiếp phê duyệt change
   // request), và trang danh sách chỉ tồn tại ở `/manager/field-ops/change-requests` — nên chỉ tính/hiện
   // mục này cho Manager, không hiện cho Admin.
-  const pendingChangeRequests = useMemo(() => (isAdmin ? [] : getFieldChangeRequests().filter((cr) => cr.status === 'PENDING')), [isAdmin]);
+  //
+  // Set các id vừa duyệt ngay trong dropdown (nút "Duyệt ngay") — lọc thêm vào useMemo bên dưới để ẩn
+  // ngay lập tức khỏi danh sách mà không cần điều hướng sang trang Change Request mới thấy cập nhật.
+  const [locallyApprovedIds, setLocallyApprovedIds] = useState<Set<string>>(new Set());
+  const pendingChangeRequests = useMemo(
+    () => (isAdmin ? [] : getFieldChangeRequests().filter((cr) => cr.status === 'PENDING' && !locallyApprovedIds.has(cr.id))),
+    [isAdmin, locallyApprovedIds],
+  );
+
+  const handleApproveChangeRequest = (id: string) => {
+    reviewFieldChangeRequest(id, 'APPROVED', user?.fullName ?? 'Quản lý vận hành');
+    setLocallyApprovedIds((prev) => new Set(prev).add(id));
+  };
+
   const totalNotifications = approachingEvents.length + pendingChangeRequests.length;
 
   const orderDetailPath = (orderId: string) =>
@@ -151,14 +164,16 @@ export default function Header() {
                         </p>
                       ) : (
                         pendingChangeRequests.map((cr) => (
-                          <Link
+                          <div
                             key={cr.id}
-                            href="/manager/field-ops/change-requests"
-                            onClick={() => setIsNotifOpen(false)}
-                            className="flex items-start gap-2.5 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-slate-50"
+                            className="flex items-start gap-2 px-3.5 py-2.5 text-sm transition-colors duration-150 hover:bg-slate-50"
                           >
                             <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                            <span className="min-w-0 flex-1">
+                            <Link
+                              href={`/manager/field-ops/change-requests?id=${cr.id}`}
+                              onClick={() => setIsNotifOpen(false)}
+                              className="min-w-0 flex-1"
+                            >
                               <span className="block truncate font-medium text-slate-800">
                                 {cr.customerName} — {CHANGE_REQUEST_TYPE_META[cr.type].label}
                               </span>
@@ -166,8 +181,15 @@ export default function Header() {
                               <span className="text-xs font-semibold text-amber-600">
                                 {cr.orderId} · {cr.requestedBy}
                               </span>
-                            </span>
-                          </Link>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => handleApproveChangeRequest(cr.id)}
+                              className="mt-0.5 shrink-0 rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 transition-colors duration-150 hover:bg-emerald-100"
+                            >
+                              Duyệt ngay
+                            </button>
+                          </div>
                         ))
                       )}
                     </div>
