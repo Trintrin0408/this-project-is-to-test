@@ -281,7 +281,9 @@ export function nextAdminSchedulePlanId(): string {
   return `KHOP-2026-${String(maxNum + 1).padStart(4, '0')}`;
 }
 
-// Đơn đặt đã xác nhận nhưng chưa có kế hoạch điều phối — nguồn chọn cho form tạo kế hoạch mới.
+// Đơn đặt chưa có kế hoạch điều phối — nguồn chọn cho form tạo kế hoạch mới. Lấy TOÀN BỘ đơn đặt
+// (mọi trạng thái, khớp đúng nội dung trang "Danh sách đơn đặt"), không giới hạn riêng CONFIRMED/
+// IN_PROGRESS nữa — ô tìm kiếm ở đây phải liên kết được với tất cả đơn hàng, không phải 1 tập con.
 // currentPlanId: khi sửa kế hoạch, vẫn cần hiện đơn đặt đang gắn với chính kế hoạch đó trong danh
 // sách (dù đơn đó đã "có kế hoạch" — chính là kế hoạch đang sửa).
 export function getUnplannedOrders(currentPlanId?: string) {
@@ -289,7 +291,7 @@ export function getUnplannedOrders(currentPlanId?: string) {
     store.filter((p) => p.id !== currentPlanId).map((p) => p.orderId),
   );
   return getAdminOrders()
-    .filter((o) => (o.status === 'CONFIRMED' || o.status === 'IN_PROGRESS') && !plannedOrderIds.has(o.orderId))
+    .filter((o) => !plannedOrderIds.has(o.orderId))
     .map((o) => ({
       orderId: o.orderId,
       quotationId: undefined as string | undefined,
@@ -301,15 +303,17 @@ export function getUnplannedOrders(currentPlanId?: string) {
     }));
 }
 
-// Báo giá chưa duyệt (chưa có đơn đặt thật) và chưa gắn kế hoạch nào — nguồn "đơn đặt ảo" bổ sung cho
-// form tạo kế hoạch, phục vụ lập lịch khảo sát hiện trường sớm ngay từ ô tìm kiếm (không bắt buộc phải
-// đi từ trang chi tiết báo giá với ?quotationId= mới thấy được báo giá đó nữa).
+// Báo giá chưa gắn kế hoạch nào — nguồn "đơn đặt ảo" bổ sung cho form tạo kế hoạch, phục vụ lập lịch
+// khảo sát hiện trường sớm ngay từ ô tìm kiếm (không bắt buộc phải đi từ trang chi tiết báo giá với
+// ?quotationId= mới thấy được báo giá đó nữa). Lấy TOÀN BỘ báo giá (mọi trạng thái, khớp đúng nội
+// dung trang "Quản lý báo giá"), không giới hạn riêng draft/surveying nữa — cùng lý do như
+// getUnplannedOrders ở trên.
 export function getUnplannedQuotations(currentPlanId?: string) {
   const plannedQuotationIds = new Set(
     store.filter((p) => p.id !== currentPlanId && p.quotationId).map((p) => p.quotationId as string),
   );
   return getAdminQuotations()
-    .filter((q) => (q.status === 'draft' || q.status === 'surveying') && !plannedQuotationIds.has(q.quotationId))
+    .filter((q) => !plannedQuotationIds.has(q.quotationId))
     .map((q) => ({
       orderId: q.code,
       quotationId: q.quotationId as string | undefined,

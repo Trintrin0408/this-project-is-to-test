@@ -74,9 +74,8 @@ const ADMIN_NAV_SECTIONS: NavSection[] = [
         icon: ShoppingBag,
         children: [
           { label: 'Danh sách đơn đặt', href: '/admin/orders_audit', icon: ClipboardList, badge: 5, badgeColor: 'red' },
-          { label: 'Đặt cọc & thanh toán', href: '/admin/orders_audit/payments', icon: CreditCard },
-          
-        
+          { label: 'Đặt cọc', href: '/admin/orders_audit/payments', icon: CreditCard },
+          { label: 'Thanh toán', href: '/admin/orders_audit/settlements', icon: Wallet },
         ],
       },
     ],
@@ -136,7 +135,16 @@ const MANAGER_NAV_SECTIONS: NavSection[] = [
       { label: 'Tổng quan', href: '/manager/dashboard', icon: LayoutGrid },
       { label: 'Khách hàng', href: '/manager/customers', icon: Users },
       { label: 'Báo giá', href: '/manager/quotations', icon: FileText },
-      { label: 'Đơn hàng', href: '/manager/orders', icon: ShoppingBag },
+      {
+        label: 'Quản lý đơn đặt',
+        href: '/manager/orders',
+        icon: ShoppingBag,
+        children: [
+          { label: 'Danh sách đơn đặt', href: '/manager/orders', icon: ClipboardList, badge: 5, badgeColor: 'red' },
+          { label: 'Đặt cọc', href: '/manager/payments/deposits', icon: CreditCard },
+          { label: 'Thanh toán', href: '/manager/payments/settlements', icon: Wallet },
+        ],
+      },
       { label: 'Khảo sát', href: '/manager/survey', icon: MapPin },
       {
         label: 'Lịch trình',
@@ -177,7 +185,6 @@ const MANAGER_NAV_SECTIONS: NavSection[] = [
           { label: 'Change Request', href: '/manager/field-ops/change-requests', icon: AlertTriangle },
         ],
       },
-      { label: 'Thanh toán', href: '/manager/payments/deposits', icon: CreditCard },
       { label: 'Công & lương', href: '/manager/wages', icon: Wallet },
     ],
   },

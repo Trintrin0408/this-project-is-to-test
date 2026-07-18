@@ -165,10 +165,10 @@ export default function PlanFormDrawer({ isOpen, editingPlan, defaultOrderId, qu
           <div className="max-w-2xl flex-grow space-y-6">
             <div className="space-y-4 rounded-2xl border border-slate-150 bg-slate-50 p-5">
               <h4 className="border-l-2 border-blue-600 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">
-                Section 1: Thông tin đơn đặt hàng
+                Section 1: Thông tin đơn hàng/ báo giá
               </h4>
               <SearchableSelect
-                label="Lựa chọn đơn đặt hàng"
+                label="Lựa chọn đơn đặt/ báo giá"
                 value={orderId}
                 onChange={setOrderId}
                 disabled={!!editingPlan}

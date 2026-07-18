@@ -392,8 +392,13 @@ function resolve(method: string, path: string, params: Record<string, unknown>, 
   {
     const settlementParams = matchPath('/orders/:orderId/settlement', path);
     if (m === 'POST' && settlementParams) {
-      const payload = (body as { notes?: string }) ?? {};
-      confirmSettlement(settlementParams.orderId, payload.notes);
+      const payload = (body as { additionalFee?: number; compensation?: number; paymentMethod?: string; notes?: string }) ?? {};
+      confirmSettlement(settlementParams.orderId, {
+        additionalFee: payload.additionalFee,
+        compensation: payload.compensation,
+        paymentMethod: payload.paymentMethod,
+        note: payload.notes,
+      });
       const settlementId = nextId('settlement');
       return { status: 201, data: envelope({ settlementId, orderId: settlementParams.orderId }, undefined, 'Ghi nhận quyết toán thành công (dữ liệu mô phỏng)') };
     }

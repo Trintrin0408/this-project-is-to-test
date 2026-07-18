@@ -13,60 +13,132 @@ import {
   DepositStatus,
   OrderPaymentView,
   PAYMENT_METHOD_OPTIONS,
-  SETTLEMENT_STATUS_META,
-  SettlementStatus,
+  QuotationAwaitingDeposit,
   getOrderPaymentViews,
+  getQuotationsAwaitingDeposit,
 } from '@/mocks/db';
 
-// Trang thuần giao diện — xem giải thích ở đầu src/mocks/db/payments.ts. Khớp ảnh mẫu
-// "Đặt cọc & Thanh toán": panel "Bộ lọc & tìm kiếm" (tìm kiếm + 3 dropdown trạng thái/phương thức +
-// đặt lại bộ lọc) và bảng đơn đặt kèm trạng thái cọc/quyết toán độc lập. "Xem chi tiết" dẫn tới trang
-// /admin/orders_audit/payments/[id] (hồ sơ cọc + quyết toán đầy đủ).
+// Trang thuần giao diện — xem giải thích ở đầu src/mocks/db/payments.ts. Tách riêng khỏi màn "Thanh
+// toán" (quyết toán cuối kỳ, /admin/orders_audit/settlements) theo yêu cầu người dùng — trước đây 2
+// nội dung này gộp chung 1 bảng + 1 trang chi tiết có tab, giờ là 2 màn độc lập. Trang này chỉ còn tập
+// trung vào tiền cọc; "Xem chi tiết" dẫn tới /admin/orders_audit/payments/[id] (chỉ hồ sơ cọc).
+//
+// Theo yêu cầu người dùng, bảng còn gộp thêm báo giá đã duyệt nhưng CHƯA tạo đơn đặt thật
+// (getQuotationsAwaitingDeposit — luôn "Chờ thanh toán" vì chưa thể có hồ sơ cọc thật khi chưa có đơn)
+// để thấy đủ bức tranh báo giá nào sắp tới cần cọc, không chỉ đơn đặt đã tồn tại. Dòng báo giá dẫn
+// sang trang chi tiết BÁO GIÁ (không phải trang chi tiết đặt cọc) vì chưa có gì để xác nhận ở đây.
 
 type DepositFilter = '' | DepositStatus;
-type SettlementFilter = '' | SettlementStatus;
+type DepositRowKind = 'order' | 'quotation';
+type KindFilter = '' | DepositRowKind;
+
+const KIND_FILTER_OPTIONS: { value: KindFilter; label: string }[] = [
+  { value: '', label: 'Loại: Tất cả' },
+  { value: 'order', label: 'Đơn đặt' },
+  { value: 'quotation', label: 'Báo giá' },
+];
+
+interface DepositListRow {
+  key: string;
+  kind: DepositRowKind;
+  code: string;
+  eventTitle: string;
+  customerName: string;
+  customerPhone: string;
+  totalValue: number;
+  depositAmount: number;
+  isEstimatedDeposit: boolean;
+  depositStatus: DepositStatus;
+  paymentMethod: string | null;
+  detailHref: string;
+}
 
 function paymentMethodLabel(value: string | null): string {
   if (!value) return '-';
   return PAYMENT_METHOD_OPTIONS.find((o) => o.value === value)?.label ?? value;
 }
 
+function toOrderRow(o: OrderPaymentView): DepositListRow {
+  return {
+    key: `order-${o.orderId}`,
+    kind: 'order',
+    code: o.orderCode,
+    eventTitle: o.eventTitle,
+    customerName: o.customerName,
+    customerPhone: o.customerPhone,
+    totalValue: o.totalValue,
+    depositAmount: o.depositAmount,
+    isEstimatedDeposit: false,
+    depositStatus: o.depositStatus,
+    paymentMethod: o.paymentMethod,
+    detailHref: `/admin/orders_audit/payments/${o.orderId}`,
+  };
+}
+
+function toQuotationRow(q: QuotationAwaitingDeposit): DepositListRow {
+  return {
+    key: `quotation-${q.quotationId}`,
+    kind: 'quotation',
+    code: q.quotationCode,
+    eventTitle: q.eventTitle,
+    customerName: q.customerName,
+    customerPhone: q.customerPhone,
+    totalValue: q.totalValue,
+    depositAmount: q.estimatedDepositAmount,
+    isEstimatedDeposit: true,
+    depositStatus: 'PENDING',
+    paymentMethod: null,
+    detailHref: `/admin/quotations/${q.quotationId}`,
+  };
+}
+
 export default function Page() {
   const [payments] = useState<OrderPaymentView[]>(() => getOrderPaymentViews());
+  const [quotationsAwaiting] = useState<QuotationAwaitingDeposit[]>(() => getQuotationsAwaitingDeposit());
   const [search, setSearch] = useState('');
   const [depositFilter, setDepositFilter] = useState<DepositFilter>('');
-  const [settlementFilter, setSettlementFilter] = useState<SettlementFilter>('');
   const [methodFilter, setMethodFilter] = useState('');
+  const [kindFilter, setKindFilter] = useState<KindFilter>('');
 
-  const hasActiveFilters = Boolean(search || depositFilter || settlementFilter || methodFilter);
+  const rows = useMemo<DepositListRow[]>(
+    () => [...payments.map(toOrderRow), ...quotationsAwaiting.map(toQuotationRow)],
+    [payments, quotationsAwaiting],
+  );
+
+  const hasActiveFilters = Boolean(search || depositFilter || methodFilter || kindFilter);
 
   const handleResetFilters = () => {
     setSearch('');
     setDepositFilter('');
-    setSettlementFilter('');
     setMethodFilter('');
+    setKindFilter('');
   };
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return payments.filter((o) => {
-      if (depositFilter && o.depositStatus !== depositFilter) return false;
-      if (settlementFilter && o.settlementStatus !== settlementFilter) return false;
-      if (methodFilter && o.paymentMethod !== methodFilter) return false;
+    return rows.filter((r) => {
+      if (kindFilter && r.kind !== kindFilter) return false;
+      if (depositFilter && r.depositStatus !== depositFilter) return false;
+      if (methodFilter && r.paymentMethod !== methodFilter) return false;
       if (!term) return true;
-      return o.orderCode.toLowerCase().includes(term) || o.customerName.toLowerCase().includes(term);
+      return r.code.toLowerCase().includes(term) || r.customerName.toLowerCase().includes(term);
     });
-  }, [payments, search, depositFilter, settlementFilter, methodFilter]);
+  }, [rows, search, depositFilter, methodFilter, kindFilter]);
 
-  const columns: TableColumn<OrderPaymentView>[] = [
+  const columns: TableColumn<DepositListRow>[] = [
     {
-      key: 'orderCode',
-      label: 'Mã đơn đặt',
-      render: (o) => (
+      key: 'code',
+      label: 'Mã đơn đặt / báo giá',
+      render: (r) => (
         <div>
-          <p className="font-bold text-blue-600">{o.orderCode}</p>
-          <p className="mt-0.5 max-w-[200px] truncate text-xs text-slate-400" title={o.eventTitle}>
-            {o.eventTitle}
+          <div className="flex items-center gap-1.5">
+            <p className="font-bold text-blue-600">{r.code}</p>
+            {r.kind === 'quotation' && (
+              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">Báo giá</span>
+            )}
+          </div>
+          <p className="mt-0.5 max-w-[200px] truncate text-xs text-slate-400" title={r.eventTitle}>
+            {r.eventTitle}
           </p>
         </div>
       ),
@@ -74,50 +146,46 @@ export default function Page() {
     {
       key: 'customer',
       label: 'Tên khách hàng',
-      render: (o) => (
+      render: (r) => (
         <div className="flex items-center gap-2.5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400">
             <User className="h-4 w-4" />
           </span>
           <div>
-            <p className="font-semibold text-slate-800">{o.customerName}</p>
-            <p className="text-xs text-slate-400">{o.customerPhone}</p>
+            <p className="font-semibold text-slate-800">{r.customerName}</p>
+            <p className="text-xs text-slate-400">{r.customerPhone}</p>
           </div>
         </div>
       ),
     },
-    { key: 'totalValue', label: 'Tổng giá trị đơn', render: (o) => <span className="font-bold text-slate-900">{formatCurrency(o.totalValue)}</span> },
+    { key: 'totalValue', label: 'Tổng giá trị', render: (r) => <span className="font-bold text-slate-900">{formatCurrency(r.totalValue)}</span> },
     {
       key: 'depositAmount',
       label: 'Tiền đặt cọc',
-      render: (o) => <span className="font-bold text-slate-900">{formatCurrency(o.depositAmount)}</span>,
+      render: (r) => (
+        <div>
+          <span className="font-bold text-slate-900">{formatCurrency(r.depositAmount)}</span>
+          {r.isEstimatedDeposit && <p className="text-[10px] italic text-slate-400">Dự kiến, chưa tạo đơn</p>}
+        </div>
+      ),
     },
     {
       key: 'depositStatus',
       label: 'Trạng thái cọc',
-      render: (o) => (
-        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${DEPOSIT_STATUS_META[o.depositStatus].badgeClass}`}>
-          {DEPOSIT_STATUS_META[o.depositStatus].label}
+      render: (r) => (
+        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${DEPOSIT_STATUS_META[r.depositStatus].badgeClass}`}>
+          {DEPOSIT_STATUS_META[r.depositStatus].label}
         </span>
       ),
     },
-    {
-      key: 'settlementStatus',
-      label: 'Trạng thái quyết toán',
-      render: (o) => (
-        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${SETTLEMENT_STATUS_META[o.settlementStatus].badgeClass}`}>
-          {SETTLEMENT_STATUS_META[o.settlementStatus].label}
-        </span>
-      ),
-    },
-    { key: 'paymentMethod', label: 'Phương thức', render: (o) => <span className="text-slate-600">{paymentMethodLabel(o.paymentMethod)}</span> },
+    { key: 'paymentMethod', label: 'Phương thức', render: (r) => <span className="text-slate-600">{paymentMethodLabel(r.paymentMethod)}</span> },
     {
       key: 'actions',
       label: 'Xử lý',
-      render: (o) => (
+      render: (r) => (
         <div className="flex items-center gap-1">
           <Link
-            href={`/admin/orders_audit/payments/${o.orderId}`}
+            href={r.detailHref}
             aria-label="Xem chi tiết"
             title="Xem chi tiết"
             className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
@@ -132,8 +200,10 @@ export default function Page() {
   return (
     <div className="p-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-900">Đặt cọc &amp; Thanh toán</h1>
-        <p className="mt-1 text-sm text-slate-500">Theo dõi trạng thái đặt cọc và quyết toán cuối của từng đơn đặt.</p>
+        <h1 className="text-xl font-bold text-slate-900">Đặt cọc</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Theo dõi trạng thái đặt cọc của từng đơn đặt, kèm cả báo giá đã duyệt đang chờ tạo đơn.
+        </p>
       </div>
 
       <Reveal className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
@@ -149,25 +219,18 @@ export default function Page() {
 
         <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
           <Input
-            placeholder="Tìm mã đơn hoặc tên khách hàng..."
+            placeholder="Tìm mã đơn/báo giá hoặc tên khách hàng..."
             icon={<Search className="h-4 w-4" />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          <Select value={kindFilter} onChange={(e) => setKindFilter(e.target.value as KindFilter)} options={KIND_FILTER_OPTIONS} />
           <Select
             value={depositFilter}
             onChange={(e) => setDepositFilter(e.target.value as DepositFilter)}
             options={[
               { value: '', label: 'Trạng thái đặt cọc: Tất cả' },
               ...Object.entries(DEPOSIT_STATUS_META).map(([value, meta]) => ({ value, label: meta.label })),
-            ]}
-          />
-          <Select
-            value={settlementFilter}
-            onChange={(e) => setSettlementFilter(e.target.value as SettlementFilter)}
-            options={[
-              { value: '', label: 'Trạng thái quyết toán: Tất cả' },
-              ...Object.entries(SETTLEMENT_STATUS_META).map(([value, meta]) => ({ value, label: meta.label })),
             ]}
           />
           <Select
@@ -178,7 +241,7 @@ export default function Page() {
         </div>
 
         <div className="overflow-x-auto border-t border-slate-100">
-          <Table columns={columns} rows={filtered} rowKey={(row) => row.orderId} />
+          <Table columns={columns} rows={filtered} rowKey={(row) => row.key} />
         </div>
       </Reveal>
     </div>

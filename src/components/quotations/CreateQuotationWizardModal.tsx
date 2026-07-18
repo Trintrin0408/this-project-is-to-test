@@ -324,7 +324,7 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
                 />
               </div>
 
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
                 {catalogGroups.map((group) => {
                   const isOpen = catalogSearch.trim() !== '' || openCategories.has(group.category);
                   return (

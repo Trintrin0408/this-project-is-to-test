@@ -65,6 +65,10 @@ export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotati
   const [coordinatorName, setCoordinatorName] = useState(quotation.assignee ?? COORDINATOR_POOL[0]);
   const [guestCount, setGuestCount] = useState(quotation.guestCount ?? 100);
   const [notes, setNotes] = useState(quotation.notes ?? '');
+  // Mốc 2 "Xác nhận cọc & khảo sát hiện trường" ở trang chi tiết đơn (Tiến độ sự kiện) đọc trực tiếp
+  // paymentStatus/surveyAssignment của đơn — cho đánh dấu sẵn 2 việc này ngay lúc tạo đơn để những đơn
+  // khách đã đặt cọc/đã khảo sát từ trước không phải xác nhận thủ công lại lần nữa sau khi tạo.
+  const [alreadyDeposited, setAlreadyDeposited] = useState(false);
   const [items, setItems] = useState<AdminOrderLineItem[]>(() =>
     quotation.items.map((qi, idx) => ({
       id: `oi-from-${quotation.quotationId}-${idx}`,
@@ -105,9 +109,9 @@ export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotati
       venue,
       guestCount,
       totalPrice: total,
-      depositAmount: 0,
+      depositAmount: Math.round(total * 0.3),
       status: 'NEW',
-      paymentStatus: 'UNPAID',
+      paymentStatus: alreadyDeposited ? 'DEPOSITED' : 'UNPAID',
       coordinatorName,
       packageType,
       notes,
@@ -116,6 +120,10 @@ export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotati
       liveChecklist: {},
       disputeLogs: [],
       quotationId: quotation.quotationId,
+      // Kế thừa khảo sát đã lập từ báo giá (nếu có, xem "Lập kế hoạch khảo sát" ở trang chi tiết báo
+      // giá) — trước đây bỏ qua field này, khiến đơn mới luôn mất thông tin khảo sát dù báo giá gốc
+      // đã khảo sát xong, bắt xác nhận lại thủ công ở Mốc 2.
+      surveyAssignment: quotation.surveyAssignment,
     });
     onSaved();
   };
@@ -396,6 +404,33 @@ export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotati
                 <span>Trị giá chốt sau cùng:</span>
                 <span className="text-base text-blue-700">{formatCurrency(total)}</span>
               </div>
+            </div>
+
+            <div className="space-y-3 rounded-xl border border-slate-100 p-5 text-xs">
+              <p className="text-sm font-bold text-slate-950">Mốc 2 — Xác nhận cọc &amp; khảo sát hiện trường</p>
+              {quotation.surveyAssignment ? (
+                <div className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-emerald-700">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <p>
+                    Đã kế thừa khảo sát hiện trường từ báo giá {quotation.code}: <strong>{quotation.surveyAssignment.assigneeName}</strong> —{' '}
+                    {quotation.surveyAssignment.date} {quotation.surveyAssignment.time}. Không cần khảo sát lại.
+                  </p>
+                </div>
+              ) : (
+                <p className="italic text-slate-400">Báo giá chưa có khảo sát hiện trường — sau khi tạo đơn vẫn cần xác nhận khảo sát ở Mốc 2.</p>
+              )}
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={alreadyDeposited}
+                  onChange={(e) => setAlreadyDeposited(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>Khách hàng đã đặt cọc trước khi lập đơn</span>
+              </label>
+              {alreadyDeposited && quotation.surveyAssignment && (
+                <p className="italic text-emerald-600">Đã chọn cả 2 việc — đơn sẽ hoàn thành sẵn Mốc 2 ngay sau khi lưu.</p>
+              )}
             </div>
 
             <div className="flex justify-between border-t border-slate-100 pt-4">

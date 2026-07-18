@@ -1,4 +1,5 @@
-import { BOOKING_STATUS_META, BookingStatus, getAdminOrderById, getAdminOrders } from './orders';
+import { BOOKING_STATUS_META, BookingStatus, getAdminOrderById, getAdminOrders, updateAdminOrder } from './orders';
+import { getAdminQuotations } from './quotations';
 import { createMockStore, nextSequentialId } from './utils';
 
 // Nguồn Deposit/Settlement DUY NHẤT cho toàn bộ UI (Admin + Manager) — trước đây là
@@ -52,6 +53,15 @@ export interface Settlement {
   /** FK thật tới AdminOrderRow.orderId (db/orders.ts). */
   orderId: string;
   status: SettlementStatus;
+  /** Phụ thu phát sinh tại hiện trường (vd thêm thiết bị/dịch vụ ngoài báo giá gốc — xem
+   * FieldChangeRequest ở db/changeRequests.ts) — Manager nhập tay khi lập quyết toán, khớp field thật
+   * `Settlement.additionalFee` (types/settlement.ts). */
+  additionalFee: number;
+  /** Tiền đền bù thiết bị hỏng/mất do khách gây ra (mục 1 CLAUDE.md: giá mua × số lượng hỏng/mất) —
+   * Manager nhập tay khi lập quyết toán, khớp field thật `Settlement.compensation`. */
+  compensation: number;
+  paymentMethod: string | null;
+  evidence?: DepositEvidence;
   note?: string;
   settledAt?: string;
 }
@@ -110,11 +120,14 @@ function generateSeedSettlements(): Settlement[] {
         settlementId,
         orderId: row.orderId,
         status: 'SETTLED',
+        additionalFee: 0,
+        compensation: 0,
+        paymentMethod: index % 3 === 0 ? 'cash' : 'bank_transfer',
         note: 'Đã quyết toán đủ 100% giá trị hợp đồng, không phát sinh phụ phí.',
         settledAt: addDays(today, -(5 + (index % 15))),
       };
     }
-    return { settlementId, orderId: row.orderId, status: 'UNSETTLED' };
+    return { settlementId, orderId: row.orderId, status: 'UNSETTLED', additionalFee: 0, compensation: 0, paymentMethod: null };
   });
 }
 
@@ -129,24 +142,33 @@ export function getDepositByOrderId(orderId: string): Deposit | undefined {
   return depositStore.getAll().find((d) => d.orderId === orderId);
 }
 
-/** Tự sinh hồ sơ cọc mặc định (PENDING) cho đơn chưa có hồ sơ — đơn tạo sau lúc sinh seed (vd qua
- * CreateOrderModal) không có sẵn trong generateSeedDeposits(). Tự lưu lại (persist) để lần sau tra
- * đúng bản ghi cũ thay vì tạo lại mỗi lần. */
+/** Tự sinh hồ sơ cọc cho đơn chưa có hồ sơ — đơn tạo sau lúc sinh seed (vd qua BookingFormModal /
+ * CreateOrderFromQuotationModal) không có sẵn trong generateSeedDeposits(). Tự lưu lại (persist) để
+ * lần sau tra đúng bản ghi cũ thay vì tạo lại mỗi lần.
+ *
+ * Trạng thái khởi tạo khớp theo `order.paymentStatus` hiện tại (giống hệt nhánh trong
+ * generateSeedDeposits()) thay vì luôn cố định PENDING — vì cả 2 form tạo đơn đều cho phép đánh dấu
+ * "khách hàng đã đặt cọc trước khi lập đơn" ngay lúc khởi tạo (`paymentStatus: 'DEPOSITED'`). Trước
+ * đây hàm này luôn tạo hồ sơ PENDING bất kể `paymentStatus` của đơn, khiến Mốc 2 ở "Tiến độ sự kiện"
+ * (đọc `paymentStatus`) báo "Đã cọc" trong khi màn "Đặt cọc" (đọc hồ sơ Deposit) vẫn báo "Chờ thanh
+ * toán" cho đến khi ai đó bấm xác nhận cọc thủ công lần nữa — 2 nguồn lệch nhau ngay từ lúc tạo đơn. */
 export function getOrCreateDepositForOrder(orderId: string): Deposit | undefined {
   const existing = getDepositByOrderId(orderId);
   if (existing) return existing;
   const order = getAdminOrderById(orderId);
   if (!order) return undefined;
   const depositId = nextSequentialId(depositStore.getAll(), 'depositId', 'DC', 4);
+  const isAlreadyDeposited = order.paymentStatus === 'DEPOSITED' || order.paymentStatus === 'PAID';
   const deposit: Deposit = {
     depositId,
     orderId,
     depositCode: `DEP-${depositId.replace(/\D/g, '')}`,
     amount: order.depositAmount,
-    isEstimated: true,
-    estimatedLabel: 'Dự kiến 30%',
+    isEstimated: !isAlreadyDeposited,
+    estimatedLabel: isAlreadyDeposited ? undefined : 'Dự kiến 30%',
     dueDate: addDays(new Date(order.weddingDate), -14),
-    status: 'PENDING',
+    status: isAlreadyDeposited ? 'RECEIVED' : 'PENDING',
+    paymentDate: isAlreadyDeposited ? new Date().toISOString().slice(0, 10) : undefined,
     paymentMethod: null,
   };
   depositStore.add(deposit);
@@ -163,7 +185,7 @@ export function getOrCreateSettlementForOrder(orderId: string): Settlement | und
   if (existing) return existing;
   if (!getAdminOrderById(orderId)) return undefined;
   const settlementId = nextSequentialId(settlementStore.getAll(), 'settlementId', 'ST', 4);
-  const settlement: Settlement = { settlementId, orderId, status: 'UNSETTLED' };
+  const settlement: Settlement = { settlementId, orderId, status: 'UNSETTLED', additionalFee: 0, compensation: 0, paymentMethod: null };
   settlementStore.add(settlement);
   return settlement;
 }
@@ -191,16 +213,39 @@ export function confirmDeposit(orderId: string, paymentMethod: string): void {
     paymentMethod,
     paymentDate: deposit.paymentDate ?? today,
   });
+  // Đồng bộ ngược sang AdminOrderRow.paymentStatus (trang "Đơn đặt" đọc field này, không đọc Deposit
+  // store) — trước đây xác nhận cọc ở trang "Đặt cọc & thanh toán" chỉ cập nhật Deposit, khiến trạng
+  // thái thanh toán bên "Đơn đặt" không đổi. Chỉ nâng từ UNPAID lên DEPOSITED, không hạ ngược PAID
+  // (trường hợp đơn đã quyết toán xong mà vẫn còn thao tác xác nhận cọc, dù hiếm khi xảy ra trên UI).
+  if (getAdminOrderById(orderId)?.paymentStatus === 'UNPAID') {
+    updateAdminOrder(orderId, { paymentStatus: 'DEPOSITED' });
+  }
 }
 
-export function confirmSettlement(orderId: string, note?: string): void {
+export interface SettlementAdjustments {
+  /** Phụ thu phát sinh (thêm thiết bị/dịch vụ ngoài báo giá gốc tại hiện trường). */
+  additionalFee?: number;
+  /** Tiền đền bù thiết bị hỏng/mất do khách gây ra. */
+  compensation?: number;
+  paymentMethod?: string;
+  note?: string;
+}
+
+export function confirmSettlement(orderId: string, adjustments?: SettlementAdjustments): void {
   const settlement = getOrCreateSettlementForOrder(orderId);
   if (!settlement) return;
   settlementStore.update(settlement.settlementId, {
     status: 'SETTLED',
-    note: note ?? settlement.note,
+    additionalFee: adjustments?.additionalFee ?? settlement.additionalFee,
+    compensation: adjustments?.compensation ?? settlement.compensation,
+    paymentMethod: adjustments?.paymentMethod ?? settlement.paymentMethod,
+    note: adjustments?.note ?? settlement.note,
     settledAt: settlement.settledAt ?? new Date().toISOString().slice(0, 10),
   });
+}
+
+export function getSettlementTransferContent(settlement: Pick<Settlement, 'settlementId'>, orderCode: string): string {
+  return `${settlement.settlementId} QUYET TOAN ${orderCode}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,10 +279,12 @@ export function markDepositStatusForMockRoute(depositId: string, status: 'RECEIV
 }
 
 // ---------------------------------------------------------------------------
-// View tổng hợp cho trang "Đặt cọc & Thanh toán" (/admin/orders_audit/payments,
-// /manager/payments/deposits) — ghép Order + Deposit + Settlement thành 1 view model duy nhất, dùng
-// chung cho cả 2 role thay vì mỗi trang tự query rời rạc. Trước Task 19 đây là field lồng sẵn trong
-// AdminOrderPayment (adminOrderPaymentsMock.ts, chỉ 5 bản ghi bịa) — giờ derive thật từ 3 nguồn.
+// View tổng hợp dùng chung cho cả 2 màn "Đặt cọc" (/admin/orders_audit/payments,
+// /manager/payments/deposits) và "Thanh toán" (/admin/orders_audit/settlements,
+// /manager/payments/settlements, tách riêng theo yêu cầu người dùng — trước đây gộp 1 màn có tab) —
+// ghép Order + Deposit + Settlement thành 1 view model duy nhất, dùng chung cho cả 2 role thay vì mỗi
+// trang tự query rời rạc. Trước Task 19 đây là field lồng sẵn trong AdminOrderPayment
+// (adminOrderPaymentsMock.ts, chỉ 5 bản ghi bịa) — giờ derive thật từ 3 nguồn.
 // ---------------------------------------------------------------------------
 
 export interface OrderPaymentView {
@@ -262,12 +309,19 @@ export interface OrderPaymentView {
   paymentMethod: string | null;
   depositEvidence?: DepositEvidence;
   accountantNote?: string;
+  settlementId: string;
   settlementStatus: SettlementStatus;
   settlementNote?: string;
   /** Ngày quyết toán thực tế (Settlement.settledAt) — thêm ở Task 21 để dashboard doanh thu tính theo
    * ngày THU TIỀN thật (deposit.paymentDate / settlement.settledAt) thay vì ngày tổ chức sự kiện
    * (eventDate), vốn không phản ánh đúng thời điểm ghi nhận doanh thu. */
   settlementSettledAt?: string;
+  /** Phụ thu phát sinh đã ghi nhận khi quyết toán (0 nếu chưa quyết toán). */
+  settlementAdditionalFee: number;
+  /** Tiền đền bù hỏng/mất đã ghi nhận khi quyết toán (0 nếu chưa quyết toán). */
+  settlementCompensation: number;
+  settlementPaymentMethod: string | null;
+  settlementEvidence?: DepositEvidence;
 }
 
 export function getOrderPaymentViews(): OrderPaymentView[] {
@@ -296,9 +350,14 @@ export function getOrderPaymentViews(): OrderPaymentView[] {
         paymentMethod: deposit.paymentMethod,
         depositEvidence: deposit.evidence,
         accountantNote: deposit.accountantNote,
+        settlementId: settlement.settlementId,
         settlementStatus: settlement.status,
         settlementNote: settlement.note,
         settlementSettledAt: settlement.settledAt,
+        settlementAdditionalFee: settlement.additionalFee,
+        settlementCompensation: settlement.compensation,
+        settlementPaymentMethod: settlement.paymentMethod,
+        settlementEvidence: settlement.evidence,
       };
     })
     .filter((view): view is OrderPaymentView => Boolean(view));
@@ -306,4 +365,51 @@ export function getOrderPaymentViews(): OrderPaymentView[] {
 
 export function getOrderPaymentViewById(orderId: string): OrderPaymentView | undefined {
   return getOrderPaymentViews().find((v) => v.orderId === orderId);
+}
+
+/** Số tiền đã thu / còn lại của 1 đơn — dùng chung cho cả 2 màn "Đặt cọc" và "Thanh toán" (trước đây
+ * mỗi trang chi tiết tự tính riêng công thức này, không tính tới `settlementAdditionalFee`/
+ * `settlementCompensation` khi đơn đã quyết toán). Sau khi quyết toán, đơn coi là đã thu đủ (kể cả
+ * phụ thu/đền bù) nên `remainingAmount` luôn = 0, không trừ ngược ra số âm. */
+export function computeOrderFinancials(view: OrderPaymentView): { paidAmount: number; remainingAmount: number } {
+  if (view.settlementStatus === 'SETTLED') {
+    return { paidAmount: view.totalValue + view.settlementAdditionalFee + view.settlementCompensation, remainingAmount: 0 };
+  }
+  const paidAmount = view.depositStatus === 'RECEIVED' ? view.depositAmount : 0;
+  return { paidAmount, remainingAmount: view.totalValue - paidAmount };
+}
+
+// ---------------------------------------------------------------------------
+// Báo giá đã duyệt nhưng CHƯA có đơn đặt thật — dùng cho màn "Đặt cọc" (theo yêu cầu người dùng: hiện
+// cả báo giá, dù đã cọc hay chưa). Theo nghiệp vụ, cọc chỉ chốt được sau khi có đơn đặt thật (xem
+// CLAUDE.md "Quotation cuối + yêu cầu cọc → xác nhận cọc"), nên các báo giá này không thể có hồ sơ
+// Deposit thật — luôn coi là "Chưa cọc" và không có thao tác xác nhận cọc ngay tại đây; bấm vào phải
+// dẫn sang trang chi tiết báo giá (nơi có nút "Tạo đơn") thay vì trang chi tiết đặt cọc.
+// ---------------------------------------------------------------------------
+
+export interface QuotationAwaitingDeposit {
+  quotationId: string;
+  quotationCode: string;
+  eventTitle: string;
+  customerName: string;
+  customerPhone: string;
+  totalValue: number;
+  /** Số tiền cọc ước tính (30%, khớp công thức sinh `AdminOrderRow.depositAmount` ở db/orders.ts) —
+   * chỉ mang tính tham khảo vì báo giá chưa có yêu cầu cọc thật. */
+  estimatedDepositAmount: number;
+}
+
+export function getQuotationsAwaitingDeposit(): QuotationAwaitingDeposit[] {
+  const linkedQuotationIds = new Set(getAdminOrders().filter((o) => o.quotationId).map((o) => o.quotationId));
+  return getAdminQuotations()
+    .filter((q) => q.status === 'approved' && !linkedQuotationIds.has(q.quotationId))
+    .map((q) => ({
+      quotationId: q.quotationId,
+      quotationCode: q.code,
+      eventTitle: `Báo giá ${q.code}`,
+      customerName: q.customerName,
+      customerPhone: q.customerPhone,
+      totalValue: q.totalAmount,
+      estimatedDepositAmount: Math.round(q.totalAmount * 0.3),
+    }));
 }

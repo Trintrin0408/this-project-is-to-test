@@ -76,18 +76,20 @@ type DetailTab = 'overview' | 'lifecycle' | 'items' | 'plans' | 'quotation' | 'd
 
 const TABS: { id: DetailTab; label: string; icon: typeof Activity }[] = [
   { id: 'overview', label: 'Tổng quan sự kiện', icon: Activity },
-  { id: 'lifecycle', label: 'Vòng đời vận hành', icon: RefreshCw },
+  { id: 'lifecycle', label: 'Tiến độ sự kiện', icon: RefreshCw },
   { id: 'items', label: 'Thiết bị & Kho hàng', icon: Box },
   { id: 'plans', label: 'Lịch trình & Kỹ thuật', icon: Calendar },
   { id: 'quotation', label: 'Báo giá & Hợp đồng', icon: FileText },
   { id: 'dispute', label: 'Tranh chấp', icon: AlertOctagon },
 ];
 
+// Nhãn từng mốc lấy thẳng từ BOOKING_STATUS_META (db/orders.ts, gốc ORDER_STATUS_LABEL) — khớp đúng
+// tên trạng thái hiển thị ở badge/dropdown "Trạng thái" phía trên, không tự đặt tên riêng khác đi.
 const LIFECYCLE_STEPS: { id: BookingStatus; label: string; desc: string }[] = [
-  { id: 'NEW', label: '1. Khởi tạo', desc: 'Lập đơn & hợp đồng' },
-  { id: 'CONFIRMED', label: '2. Xác nhận', desc: 'Xác nhận đặt cọc' },
-  { id: 'IN_PROGRESS', label: '3. Thi công', desc: 'Vận hành & live show' },
-  { id: 'COMPLETED', label: '4. Hoàn tất', desc: 'Quyết toán & nghiệm thu' },
+  { id: 'NEW', label: `1. ${BOOKING_STATUS_META.NEW.label}`, desc: 'Lập đơn & hợp đồng' },
+  { id: 'CONFIRMED', label: `2. ${BOOKING_STATUS_META.CONFIRMED.label}`, desc: 'Xác nhận đặt cọc' },
+  { id: 'IN_PROGRESS', label: `3. ${BOOKING_STATUS_META.IN_PROGRESS.label}`, desc: 'Vận hành & live show' },
+  { id: 'COMPLETED', label: `4. ${BOOKING_STATUS_META.COMPLETED.label}`, desc: 'Quyết toán & nghiệm thu' },
 ];
 const LIFECYCLE_ORDER: BookingStatus[] = ['NEW', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'];
 
@@ -569,7 +571,7 @@ export default function ManagerOrderDetailPage() {
                 className="flex flex-col gap-4 rounded-xl border border-slate-800 bg-gradient-to-r from-slate-900 to-blue-950 p-6 text-white shadow-md md:flex-row md:items-center md:justify-between"
               >
                 <div className="space-y-1">
-                  <h4 className="text-base font-bold">Hồ sơ giám sát vòng đời vận hành</h4>
+                  <h4 className="text-base font-bold">Hồ sơ giám sát tiến độ sự kiện</h4>
                   <p className="text-xs text-slate-300">Theo dõi các mốc tiến độ chuẩn bị vật tư, tiền cọc và chạy chương trình thực tế.</p>
                 </div>
                 <div className="shrink-0 rounded-lg border border-white/10 bg-white/10 px-4 py-2.5 text-center md:text-right">

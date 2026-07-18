@@ -197,21 +197,28 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
   **Nguyên nhân**: `src/app/auth/login/page.tsx` có `useEffect` tự động điều hướng sang dashboard nếu phát hiện đã có phiên đăng nhập lưu trong `localStorage` (từ lần đăng nhập trước) — mở lại `/` hoặc `/auth/login` sẽ tự nhảy thẳng vào Manager/Admin dashboard, không hiện form đăng nhập.
   **Đã sửa**: xóa hẳn `useEffect` auto-redirect đó — trang login giờ LUÔN hiện form, dù còn phiên cũ hay không, theo đúng yêu cầu. `ProtectedRoute.tsx` (chặn truy cập trang đã bảo vệ khi CHƯA đăng nhập) giữ nguyên, không liên quan.
   Đã kiểm tra: `npx tsc --noEmit` sạch; test Playwright — đăng nhập Manager xong, mở lại `/auth/login` và `/` đều hiện đúng form đăng nhập thay vì tự chuyển hướng. 0 lỗi console.
-- [ ]  Đổi tên sao cho phù hợp
+- [X]  Đổi tên sao cho phù hợp
 
   ![1784133641919](images/DEMO_CHECKLIST/1784133641919.png)
-- [ ]  Chưa kế thừa dữ liệu (hiển thị ở lựa chọn đơn đặt hàng)
+- [X]  Chưa kế thừa dữ liệu (hiển thị ở lựa chọn đơn đặt hàng)
 
   ![1784133674003](images/DEMO_CHECKLIST/1784133674003.png)
-- [ ]  chưa cập nhật được trạng thái cọc
+  **Đã sửa** (`src/components/planning/PlanFormDrawer.tsx`, drawer "Lập kế hoạch điều phối mới" dùng chung Admin/Manager): đổi tên "Section 1: Thông tin đơn đặt hàng" → "Section 1: Thông tin đơn hàng/ báo giá" và nhãn ô chọn "Lựa chọn đơn đặt hàng" → "Lựa chọn đơn đặt/ báo giá" cho khớp đúng nội dung — ô này vốn đã gộp cả `getUnplannedOrders()` và `getUnplannedQuotations()` vào cùng 1 ô tìm kiếm, chỉ có tên nhãn cũ chưa phản ánh đúng là ô này liên kết cả 2 loại dữ liệu.
+  **Phát hiện thêm sau khi test lại** (người dùng đối chiếu trực tiếp với trang "Quản lý báo giá"): nội dung ô search trong drawer vẫn khác trang danh sách báo giá thật — vì `getUnplannedQuotations()`/`getUnplannedOrders()` (`src/mocks/db/schedulePlans.ts`) đang lọc cứng theo trạng thái (`draft`/`surveying` cho báo giá, `CONFIRMED`/`IN_PROGRESS` cho đơn) trước khi đưa vào ô tìm kiếm, nên phần lớn báo giá `approved`/`rejected` (72/125 báo giá theo KPI trang Quản lý báo giá) không bao giờ xuất hiện được trong drawer dù có trong bảng danh sách chính.
+  **Đã sửa tiếp**: bỏ điều kiện lọc theo trạng thái ở cả 2 hàm — giờ liệt kê TOÀN BỘ đơn đặt và TOÀN BỘ báo giá (mọi trạng thái, đúng khớp nội dung trang "Danh sách đơn đặt"/"Quản lý báo giá"), chỉ còn loại trừ đơn/báo giá đã gắn kế hoạch khác (tránh tạo trùng kế hoạch cho cùng 1 đối tượng).
+  Đã kiểm tra: `npx tsc --noEmit` sạch. Chưa có tool trình duyệt trong phiên này để chụp screenshot xác nhận trực quan — cần người dùng tự mở lại drawer, gõ "BG" và đối chiếu số lượng/mã kết quả với trang "Quản lý báo giá" để xác nhận đã khớp.
+- [X]  chưa cập nhật được trạng thái cọc
   ![1784133724359](images/DEMO_CHECKLIST/1784133724359.png)
+  **Nguyên nhân**: xác nhận cọc ở trang "Đặt cọc & thanh toán" (`admin/orders_audit/payments/[id]`, `manager/payments/deposits/[id]`) gọi `confirmDeposit()` (`src/mocks/db/payments.ts`) — hàm này chỉ cập nhật `Deposit.status` (nguồn riêng cho trang thanh toán), không đụng tới `AdminOrderRow.paymentStatus` (field trang "Đơn đặt" đọc để hiện badge "Chưa thanh toán/Đã cọc/Đã thanh toán"). Vì vậy xác nhận cọc xong ở trang thanh toán, trang "Đơn đặt" vẫn hiện "Chưa thanh toán" như cũ.
+  **Đã sửa**: `confirmDeposit()` giờ đồng bộ luôn sang `updateAdminOrder(orderId, { paymentStatus: 'DEPOSITED' })` (chỉ nâng từ `UNPAID`, không hạ ngược nếu đơn đã `PAID`) — xác nhận cọc ở "Đặt cọc & thanh toán" giờ phản ánh đúng ngay trên badge trạng thái thanh toán ở cả danh sách và chi tiết "Đơn đặt" (2 role).
+  Đã kiểm tra: `npx tsc --noEmit` sạch. Chưa có tool trình duyệt trong phiên này để chụp screenshot xác nhận trực quan.
 - [X]  Search đc khách hàng
 
   ![1784133772486](images/DEMO_CHECKLIST/1784133772486.png)
 - [X]  thu gọn theo mục và có thể search
 
   ![1784133818568](images/DEMO_CHECKLIST/1784133818568.png)
-- [ ]  danh sách hạng mục thu gọn lại theo thanh lăn
+- [X]  danh sách hạng mục thu gọn lại theo thanh lăn
 - [X]  khi phân công khảo sát xong phải button " quản lí kế hoạch khảo sát " chuyển thành " đổi lịch phân công" và update kế hoạch lên màn hình
   ![1784134012532](images/DEMO_CHECKLIST/1784134012532.png)
 - [X]  xóa phần dự kiến
@@ -245,6 +252,7 @@ _(điền theo format: `- [Trang/route] — mô tả lỗi — file nghi ngờ l
   Đã kiểm tra: `npx tsc --noEmit` sạch; test bằng Playwright (đăng nhập Admin, **điều hướng bằng click thật trong app** — không dùng `page.goto()` giữa các bước vì phát hiện `MOCK_POLICIES` là mảng in-memory thuần như `schedulePlans.ts`, reload cứng sẽ mất thay đổi vừa sửa, không phải lỗi của tính năng) — mở báo giá `bg-1` thấy đúng 4 chính sách thật (3 mốc hoàn cọc + tỉ lệ cọc chuẩn) kèm ngày hết hạn thật; sang `/admin/policies` sửa "Tỉ lệ đặt cọc tiêu chuẩn" từ 50% → 60% → quay lại đúng báo giá `bg-1` bằng điều hướng trong app → **giá trị trên báo giá cập nhật ngay thành 60%**, chứng minh liên kết dữ liệu thật (không phải 2 nguồn tách rời). Đối chiếu thêm phía Manager (`manager/quotations/bg-1`) hiển thị đúng. 0 lỗi console.
 
   ![1784140800106](images/DEMO_CHECKLIST/1784140800106.png)
+- [ ]  đây phải là tiến trình của báo giá, search đc báo giá![1784226141062](images/DEMO_CHECKLIST/1784226141062.png)
 - [ ]  xóa tiến độ sắp xếp kho vật tư. Ở mỗi đầu việc sẽ update giờ bắt đầu làm, giờ hoàn thành thực tế theo leader staff cập nhật
 
   ![1784170593002](images/DEMO_CHECKLIST/1784170593002.png)

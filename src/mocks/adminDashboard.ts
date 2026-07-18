@@ -32,7 +32,8 @@ function monthKeyOf(dateStr: string): string {
 }
 
 /** Số tiền thực đã thu của 1 đơn kèm ngày ghi nhận — khớp đúng công thức `paidAmount` đã dùng ở
- * trang chi tiết Đặt cọc & Thanh toán (`admin/orders_audit/payments/[id]`): đã quyết toán thì tính
+ * trang chi tiết "Đặt cọc" (`admin/orders_audit/payments/[id]`) và "Thanh toán"
+ * (`admin/orders_audit/settlements/[id]`): đã quyết toán thì tính
  * đủ giá trị đơn (ghi nhận vào ngày quyết toán `settlementSettledAt`), chưa quyết toán thì chỉ tính
  * cọc đã nhận (ghi nhận vào ngày nhận cọc `depositPaymentDate`), chưa cọc thì không có doanh thu.
  * Dùng ngày THU TIỀN thật thay vì `eventDate` (ngày tổ chức sự kiện) — vì đơn hàng có thể tổ chức ở
