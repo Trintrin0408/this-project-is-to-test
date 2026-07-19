@@ -21,8 +21,27 @@ function emptyValues(): Omit<AdminCustomer, 'customerId' | 'totalBookings' | 'to
   return { customerName: '', phone: '', email: '', address: '', notes: '', status: 'active' };
 }
 
+interface CustomerFormErrors {
+  customerName?: string;
+  phone?: string;
+  address?: string;
+}
+
+function validate(values: Omit<AdminCustomer, 'customerId' | 'totalBookings' | 'totalSpent'>): CustomerFormErrors {
+  const errors: CustomerFormErrors = {};
+  if (!values.customerName.trim()) errors.customerName = 'Vui lòng nhập họ và tên khách hàng.';
+  if (!values.phone.trim()) {
+    errors.phone = 'Vui lòng nhập số điện thoại.';
+  } else if (!/^\d{10}$/.test(values.phone.trim())) {
+    errors.phone = 'Số điện thoại phải đủ 10 số.';
+  }
+  if (!values.address.trim()) errors.address = 'Vui lòng nhập địa chỉ khách hàng.';
+  return errors;
+}
+
 export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }: Readonly<CustomerFormModalProps>) {
   const [values, setValues] = useState(emptyValues);
+  const [errors, setErrors] = useState<CustomerFormErrors>({});
   const [wasOpen, setWasOpen] = useState(isOpen);
 
   if (isOpen !== wasOpen) {
@@ -40,11 +59,14 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
             }
           : emptyValues(),
       );
+      setErrors({});
     }
   }
 
   const handleSubmit = () => {
-    if (!values.customerName.trim() || !values.phone.trim()) return;
+    const nextErrors = validate(values);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
     onSubmit(values);
   };
 
@@ -67,9 +89,29 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
       footer={footer}
     >
       <div className="flex flex-col gap-4">
-        <Input label="Họ và tên *" value={values.customerName} onChange={(e) => setValues((v) => ({ ...v, customerName: e.target.value }))} />
+        <Input
+          label="Họ và tên *"
+          value={values.customerName}
+          onChange={(e) => {
+            setValues((v) => ({ ...v, customerName: e.target.value }));
+            setErrors((err) => ({ ...err, customerName: undefined }));
+          }}
+          error={errors.customerName}
+        />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input label="Số điện thoại *" value={values.phone} onChange={(e) => setValues((v) => ({ ...v, phone: e.target.value }))} />
+          <Input
+            label="Số điện thoại *"
+            value={values.phone}
+            onChange={(e) => {
+              const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
+              setValues((v) => ({ ...v, phone: digitsOnly }));
+              setErrors((err) => ({ ...err, phone: undefined }));
+            }}
+            error={errors.phone}
+            helpText={errors.phone ? undefined : 'Nhập đủ 10 số, ví dụ: 0987654321.'}
+            inputMode="numeric"
+            maxLength={10}
+          />
           <Input
             label="Thư điện tử (Email)"
             type="email"
@@ -86,7 +128,15 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
             { value: 'inactive', label: 'Tạm ngưng' },
           ]}
         />
-        <Input label="Địa chỉ khách hàng" value={values.address} onChange={(e) => setValues((v) => ({ ...v, address: e.target.value }))} />
+        <Input
+          label="Địa chỉ khách hàng *"
+          value={values.address}
+          onChange={(e) => {
+            setValues((v) => ({ ...v, address: e.target.value }));
+            setErrors((err) => ({ ...err, address: undefined }));
+          }}
+          error={errors.address}
+        />
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700" htmlFor="customer-notes">
             Ghi chú cụ thể

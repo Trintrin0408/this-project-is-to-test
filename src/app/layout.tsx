@@ -25,7 +25,7 @@ export default function RootLayout({
       lang="vi"
       className={`${inter.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AuthProvider>
           <PermissionProvider>{children}</PermissionProvider>
         </AuthProvider>
