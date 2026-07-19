@@ -14,11 +14,14 @@ import {
   CheckCircle2,
   ChevronLeft,
   ClipboardList,
+  Clock,
+  Eye,
   FileSignature,
   FileText,
   Lock,
   MapPin,
   Pencil,
+  Phone,
   Printer,
   PlusCircle,
   RefreshCw,
@@ -62,7 +65,16 @@ import { getUrgencyBadgeVariant } from '@/utils/eventDate';
 import { useAuth } from '@/hooks/useAuth';
 import { getAdminQuotationById } from '@/mocks/db/quotations';
 import { getAdminContracts } from '@/mocks/adminContractsMock';
-import { TASK_STATUS_META, confirmAdminScheduleTaskWithEvidence, getAdminSchedulePlans, startAdminScheduleTask } from '@/mocks/db/schedulePlans';
+import {
+  SchedulePlan,
+  TASK_STATUS_META,
+  confirmAdminScheduleTaskWithEvidence,
+  getAdminSchedulePlans,
+  removeAdminScheduleActivity,
+  removeAdminScheduleTask,
+  startAdminScheduleTask,
+} from '@/mocks/db/schedulePlans';
+import { FIELD_OPS_STAFF } from '@/mocks/db/employees';
 
 // Trang thuần giao diện — mirror 1:1 từ src/app/admin/orders_audit/[id]/page.tsx cho vai trò Manager,
 // chỉ đổi tiền tố đường dẫn /admin/orders_audit -> /manager/orders và các liên kết chéo sang khu vực
@@ -171,6 +183,88 @@ function stockBadgeClass(stock: number, needed: number): string {
   return stock < needed ? 'border-amber-200 bg-amber-50 text-amber-600' : 'border-emerald-200 bg-emerald-50 text-emerald-600';
 }
 
+// Thẻ "Lịch trình & Kỹ thuật" (tab `plans`) gộp cả PlanActivity (hoạt động chính: Khảo sát/Vận
+// chuyển/Lắp đặt/Thu hồi) LẪN PlanWorkTask (công việc kỹ thuật cụ thể) thành 1 danh sách thẻ đồng
+// nhất theo đúng thiết kế mẫu — mã LICH-xxx chỉ đánh số hiển thị trong phạm vi 1 đơn đặt, không phải
+// mã định danh lưu trữ thật.
+interface ScheduleCardItem {
+  key: string;
+  code: string;
+  kind: 'activity' | 'task';
+  refId: string;
+  category: string;
+  assigneeName: string;
+  assigneeRole: string;
+  assigneePhone: string;
+  date: string;
+  timeRangeLabel: string;
+  location: string;
+  notes: string;
+  completed: boolean;
+  checkInTime?: string;
+  checkOutTime?: string;
+}
+
+function shiftTime(hhmm: string, deltaMinutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return hhmm;
+  const total = (h * 60 + m + deltaMinutes + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function resolveStaffPhone(name: string): string {
+  return FIELD_OPS_STAFF.find((e) => e.name === name)?.phone ?? '—';
+}
+
+function buildScheduleCardItems(plan: SchedulePlan, todayStr: string): ScheduleCardItem[] {
+  const items: Omit<ScheduleCardItem, 'code'>[] = [];
+
+  plan.activities.forEach((act, index) => {
+    const staff = plan.staffList[index % plan.staffList.length];
+    const isPast = act.date < todayStr;
+    items.push({
+      key: `activity-${act.id}`,
+      kind: 'activity',
+      refId: act.id,
+      category: act.type,
+      assigneeName: staff ? `${staff.name} (${staff.role})` : 'Chưa phân công',
+      assigneeRole: 'Nhân viên kỹ thuật',
+      assigneePhone: staff ? resolveStaffPhone(staff.name) : '—',
+      date: act.date,
+      timeRangeLabel: `${act.startTime} → ${act.endTime}`,
+      location: act.location,
+      notes: act.notes,
+      completed: isPast,
+      checkInTime: isPast ? shiftTime(act.startTime, -5) : undefined,
+      checkOutTime: isPast ? shiftTime(act.endTime, -10) : undefined,
+    });
+  });
+
+  plan.tasks.forEach((task) => {
+    const [date, time] = task.startTime.split(' ');
+    items.push({
+      key: `task-${task.id}`,
+      kind: 'task',
+      refId: task.id,
+      category: task.title,
+      assigneeName: task.team.length > 0 ? `${task.assignee} (+${task.team.length} người)` : task.assignee,
+      assigneeRole: 'Nhân viên kỹ thuật',
+      assigneePhone: resolveStaffPhone(task.assignee),
+      date: date ?? task.startTime,
+      timeRangeLabel: time ?? '',
+      location: task.location,
+      notes: task.requirements,
+      completed: task.status === 'COMPLETED',
+      checkInTime: task.actualStartTime,
+      checkOutTime: task.actualEndTime,
+    });
+  });
+
+  items.sort((a, b) => (a.date + a.timeRangeLabel).localeCompare(b.date + b.timeRangeLabel));
+
+  return items.map((item, index) => ({ ...item, code: `LICH-${String(index + 1).padStart(3, '0')}` }));
+}
+
 export default function ManagerOrderDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -192,6 +286,7 @@ export default function ManagerOrderDetailPage() {
     fileName: string;
     previewUrl: string;
   } | null>(null);
+  const [scheduleDetailItem, setScheduleDetailItem] = useState<ScheduleCardItem | null>(null);
 
   if (!detail) {
     return (
@@ -286,6 +381,18 @@ export default function ManagerOrderDetailPage() {
 
   const handleStartTask = (planId: string, taskId: string) => {
     startAdminScheduleTask(planId, taskId);
+    refresh();
+  };
+
+  const handleDeleteScheduleActivity = (planId: string, activityId: string) => {
+    if (!confirm('Bạn có chắc muốn xóa hoạt động này khỏi lịch trình?')) return;
+    removeAdminScheduleActivity(planId, activityId);
+    refresh();
+  };
+
+  const handleDeleteScheduleTask = (planId: string, taskId: string) => {
+    if (!confirm('Bạn có chắc muốn xóa công việc kỹ thuật này khỏi lịch trình?')) return;
+    removeAdminScheduleTask(planId, taskId);
     refresh();
   };
 
@@ -1013,95 +1120,135 @@ export default function ManagerOrderDetailPage() {
 
               {!linkedPlan ? (
                 <p className="rounded-lg bg-slate-50 p-6 text-center text-xs italic text-slate-500">Chưa có kế hoạch điều phối nào được lập cho đơn hàng này.</p>
-              ) : (
-                <div className="space-y-4">
-                  <div>
-                    <p className="mb-2 text-xs font-bold text-slate-700">Hoạt động chính ({linkedPlan.activities.length})</p>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {linkedPlan.activities.map((act) => (
-                        <div key={act.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-slate-800">{act.type}</span>
-                            <span className="font-mono text-[10px] text-slate-500">
-                              {act.startTime} - {act.endTime}
-                            </span>
-                          </div>
-                          <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-                            <MapPin className="h-3 w-3" />
-                            {act.location}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-xs font-bold text-slate-700">Công việc kỹ thuật ({linkedPlan.tasks.length})</p>
-                    {linkedPlan.tasks.length === 0 ? (
-                      <p className="rounded-lg bg-slate-50 p-3 text-center text-[11px] italic text-slate-400">Chưa có công việc kỹ thuật nào được phân công.</p>
+              ) : (() => {
+                const scheduleItems = buildScheduleCardItems(linkedPlan, new Date().toISOString().slice(0, 10));
+                return (
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-slate-700">Lịch trình & phân công kỹ thuật ({scheduleItems.length})</p>
+                    {scheduleItems.length === 0 ? (
+                      <p className="rounded-lg bg-slate-50 p-6 text-center text-xs italic text-slate-500">Chưa có hoạt động hay công việc kỹ thuật nào được lập.</p>
                     ) : (
-                      <div className="space-y-2">
-                        {linkedPlan.tasks.map((task) => (
-                          <div key={task.id} className="flex flex-col justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs sm:flex-row sm:items-center">
-                            <div className="flex items-center gap-3">
-                              {task.evidencePhotoUrl && (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={task.evidencePhotoUrl} alt="Ảnh thi công minh chứng" className="h-11 w-11 shrink-0 rounded-lg object-cover ring-1 ring-slate-200" />
-                              )}
-                              <div>
-                                <p className="font-bold text-slate-800">{task.title}</p>
-                                <p className="mt-0.5 text-[10px] text-slate-500">
-                                  Phụ trách: {task.assignee} · Dự kiến: {task.startTime}
-                                </p>
-                                {(task.actualStartTime || task.actualEndTime) && (
-                                  <p className="mt-0.5 text-[10px] font-semibold text-slate-600">
-                                    {task.actualStartTime && <>Bắt đầu lúc: {task.actualStartTime}</>}
-                                    {task.actualStartTime && task.actualEndTime && ' · '}
-                                    {task.actualEndTime && <>Hoàn thành lúc: {task.actualEndTime}</>}
-                                  </p>
-                                )}
-                                {task.evidencePhotoName && (
-                                  <p className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-emerald-600">
-                                    <Camera className="h-3 w-3" />
-                                    {task.evidencePhotoName}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <span className={`w-fit rounded-full px-2 py-0.5 text-[10px] font-bold ${TASK_STATUS_META[task.status].badgeClass}`}>
-                                {TASK_STATUS_META[task.status].label}
+                      scheduleItems.map((item) => (
+                        <div
+                          key={item.key}
+                          className="flex flex-col gap-3 rounded-xl border border-slate-200/80 bg-white p-4 text-xs shadow-2xs sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="flex-1 space-y-1">
+                            <span className="inline-block rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-500">{item.code}</span>
+                            <p className="text-sm font-bold text-slate-900">{item.category}</p>
+                            <p className="font-semibold text-blue-700">{item.assigneeName}</p>
+                            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-slate-500">
+                              <span className="flex items-center gap-1">
+                                <Users className="h-3 w-3" />
+                                {item.assigneeRole}
                               </span>
-                              {(task.status === 'TODO' || task.status === 'ASSIGNED') && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartTask(linkedPlan.id, task.id)}
-                                  className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-700 transition hover:bg-amber-100"
-                                >
-                                  Bắt đầu làm việc
-                                </button>
+                              <span className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {item.assigneePhone}
+                              </span>
+                            </p>
+                          </div>
+
+                          <div className="flex-1 space-y-1 text-slate-600 sm:border-l sm:border-slate-100 sm:pl-4">
+                            <p className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                              {formatDate(item.date)}
+                            </p>
+                            <p className="flex items-center gap-1.5">
+                              <Clock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                              {item.timeRangeLabel}
+                            </p>
+                            <p className="flex items-center gap-1.5">
+                              <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                              <span className="truncate">{item.location}</span>
+                            </p>
+                            {item.notes && (
+                              <p className="truncate text-slate-400">
+                                Ghi chú: <span className="italic">{item.notes}</span>
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                            <span className={`w-fit rounded-full px-2.5 py-0.5 text-[10px] font-bold ${item.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {item.completed ? 'HOÀN THÀNH' : 'CHỜ XỬ LÝ'}
+                            </span>
+                            <p className="text-[10px] text-slate-400">
+                              {item.checkInTime ? `Check-in: ${item.checkInTime}` : 'Chưa check-in'}
+                              {item.checkOutTime ? ` · Check-out: ${item.checkOutTime}` : ''}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setScheduleDetailItem(item)}
+                                className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 transition hover:bg-slate-50"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Xem chi tiết
+                              </button>
+                              {!item.completed && (
+                                <>
+                                  <Link
+                                    href="/manager/schedule/plans"
+                                    className="flex items-center gap-1 rounded-lg border border-blue-200 px-2.5 py-1.5 text-[10px] font-bold text-blue-600 transition hover:bg-blue-50"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    Sửa
+                                  </Link>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      item.kind === 'activity'
+                                        ? handleDeleteScheduleActivity(linkedPlan.id, item.refId)
+                                        : handleDeleteScheduleTask(linkedPlan.id, item.refId)
+                                    }
+                                    className="flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-[10px] font-bold text-red-600 transition hover:bg-red-50"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Xóa
+                                  </button>
+                                </>
                               )}
-                              <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100">
-                                <Camera className="h-3.5 w-3.5" />
-                                {task.evidencePhotoUrl ? 'Thay ảnh' : 'Tải ảnh thi công'}
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    handleSelectTaskEvidence(linkedPlan.id, task.id, task.title, task.assignee, e.target.files?.[0]);
-                                    e.target.value = '';
-                                  }}
-                                />
-                              </label>
+                              {item.kind === 'task' &&
+                                !item.completed &&
+                                (() => {
+                                  const task = linkedPlan.tasks.find((t) => t.id === item.refId);
+                                  if (!task) return null;
+                                  return (
+                                    <>
+                                      {(task.status === 'TODO' || task.status === 'ASSIGNED') && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStartTask(linkedPlan.id, task.id)}
+                                          className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-700 transition hover:bg-amber-100"
+                                        >
+                                          Bắt đầu làm việc
+                                        </button>
+                                      )}
+                                      <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100">
+                                        <Camera className="h-3.5 w-3.5" />
+                                        {task.evidencePhotoUrl ? 'Thay ảnh' : 'Tải ảnh thi công'}
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            handleSelectTaskEvidence(linkedPlan.id, task.id, task.title, task.assignee, e.target.files?.[0]);
+                                            e.target.value = '';
+                                          }}
+                                        />
+                                      </label>
+                                    </>
+                                  );
+                                })()}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))
                     )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </motion.div>
           )}
 
@@ -1478,6 +1625,68 @@ export default function ManagerOrderDetailPage() {
             />
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!scheduleDetailItem}
+        onClose={() => setScheduleDetailItem(null)}
+        title={scheduleDetailItem?.category}
+        subtitle={scheduleDetailItem?.code}
+        footer={
+          <Button variant="secondary" onClick={() => setScheduleDetailItem(null)}>
+            Đóng
+          </Button>
+        }
+      >
+        {scheduleDetailItem && (
+          <div className="space-y-3 text-sm">
+            <div>
+              <p className="text-xs font-semibold text-slate-500">Người/đội phụ trách</p>
+              <p className="font-medium text-slate-900">{scheduleDetailItem.assigneeName}</p>
+              <p className="mt-0.5 flex items-center gap-3 text-xs text-slate-500">
+                <span className="flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" />
+                  {scheduleDetailItem.assigneeRole}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Phone className="h-3.5 w-3.5" />
+                  {scheduleDetailItem.assigneePhone}
+                </span>
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-500">Ngày</p>
+                <p className="text-slate-900">{formatDate(scheduleDetailItem.date)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500">Thời gian</p>
+                <p className="text-slate-900">{scheduleDetailItem.timeRangeLabel}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500">Địa điểm</p>
+              <p className="text-slate-900">{scheduleDetailItem.location}</p>
+            </div>
+            {scheduleDetailItem.notes && (
+              <div>
+                <p className="text-xs font-semibold text-slate-500">Ghi chú</p>
+                <p className="italic text-slate-600">{scheduleDetailItem.notes}</p>
+              </div>
+            )}
+            <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
+              <span
+                className={`w-fit rounded-full px-2.5 py-0.5 text-xs font-bold ${scheduleDetailItem.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}
+              >
+                {scheduleDetailItem.completed ? 'HOÀN THÀNH' : 'CHỜ XỬ LÝ'}
+              </span>
+              <span className="text-xs text-slate-500">
+                {scheduleDetailItem.checkInTime ? `Check-in: ${scheduleDetailItem.checkInTime}` : 'Chưa check-in'}
+                {scheduleDetailItem.checkOutTime ? ` · Check-out: ${scheduleDetailItem.checkOutTime}` : ''}
+              </span>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

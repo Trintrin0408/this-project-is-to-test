@@ -16,10 +16,10 @@ import { FIELD_OPS_STAFF } from './employees';
 // thích đầu db/employees.ts).
 
 export type PlanStatus = 'DRAFT' | 'CONFIRMED';
-export type ActivityType = 'Khảo sát' | 'Lắp đặt' | 'Thu hồi';
+export type ActivityType = 'Khảo sát' | 'Vận chuyển' | 'Lắp đặt' | 'Thu hồi';
 export type TaskStatus = 'TODO' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'BLOCKED';
 
-export const ACTIVITY_TYPE_OPTIONS: ActivityType[] = ['Khảo sát', 'Lắp đặt', 'Thu hồi'];
+export const ACTIVITY_TYPE_OPTIONS: ActivityType[] = ['Khảo sát', 'Vận chuyển', 'Lắp đặt', 'Thu hồi'];
 
 export const TASK_STATUS_META: Record<TaskStatus, { label: string; badgeClass: string }> = {
   TODO: { label: 'Chưa thực hiện', badgeClass: 'bg-slate-100 text-slate-600' },
@@ -169,6 +169,15 @@ function generateMockPlans(): SchedulePlan[] {
         },
         {
           id: `ACT-${order.orderId}-1`,
+          type: 'Vận chuyển',
+          date: addDays(new Date(activityDate), -1),
+          startTime: '14:00',
+          endTime: '16:00',
+          location: `Kho trung tâm → ${order.venue}`,
+          notes: 'Vận chuyển thiết bị, sân khấu và backdrop từ kho ra địa điểm tổ chức.',
+        },
+        {
+          id: `ACT-${order.orderId}-2`,
           type: 'Lắp đặt',
           date: addDays(new Date(activityDate), -1),
           startTime: '23:00',
@@ -177,7 +186,7 @@ function generateMockPlans(): SchedulePlan[] {
           notes: 'Lắp dựng kết cấu thô, sân khấu và backdrop chính.',
         },
         {
-          id: `ACT-${order.orderId}-2`,
+          id: `ACT-${order.orderId}-3`,
           type: 'Thu hồi',
           date: addDays(new Date(activityDate), 1),
           startTime: '08:00',
@@ -280,6 +289,17 @@ export function getAllAdminWorkTasks(): FlatWorkTask[] {
 /** Cập nhật 1 công việc kỹ thuật (đổi phân công/trạng thái) từ màn hình Công việc độc lập. */
 export function updateAdminScheduleTask(planId: string, taskId: string, patch: Partial<PlanWorkTask>): void {
   store = store.map((p) => (p.id === planId ? { ...p, tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, ...patch } : t)) } : p));
+}
+
+/** Xóa 1 hoạt động khỏi kế hoạch — dùng bởi thẻ "Lịch trình & Kỹ thuật" ở trang chi tiết đơn đặt (chỉ
+ * cho phép xóa khi hoạt động đó chưa diễn ra, kiểm tra ở phía UI trước khi gọi). */
+export function removeAdminScheduleActivity(planId: string, activityId: string): void {
+  store = store.map((p) => (p.id === planId ? { ...p, activities: p.activities.filter((a) => a.id !== activityId) } : p));
+}
+
+/** Xóa 1 công việc kỹ thuật khỏi kế hoạch — cùng ngữ cảnh với removeAdminScheduleActivity ở trên. */
+export function removeAdminScheduleTask(planId: string, taskId: string): void {
+  store = store.map((p) => (p.id === planId ? { ...p, tasks: p.tasks.filter((t) => t.id !== taskId) } : p));
 }
 
 export function nextAdminSchedulePlanId(): string {
