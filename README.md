@@ -59,24 +59,6 @@ The app will run at `http://localhost:3000`.
 | `npm run test`          | Run all Jest tests               |
 | `npm run test:coverage` | Run tests with coverage report   |
 
-## Backend API (Related Project — Separate Repo)
-
-This frontend talks to a separate backend project, **not part of this repo**:
-
-
-|               |                                                                                                                                                                  |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local path    | `D:\bnwems-backend-api`                                                                                                                                          |
-| Remote        | https://github.com/uchihamasuba/bnwems-backend-api (branch`develop`)                                                                                             |
-| Stack         | Node.js (v22 LTS) + Express + TypeScript + Prisma ORM + MySQL                                                                                                    |
-| Port          | `3001` (see `.env` → `PORT=3001`; matches `NEXT_PUBLIC_API_BASE_URL` in this repo's `.env.local`)                                                               |
-| CORS          | Backend only allows`CORS_ORIGIN=http://localhost:3000` (this app's dev port)                                                                                     |
-| Start         | `npm run dev` inside `D:\bnwems-backend-api` (ts-node, auto-reload). Success message: `Server running on port 3001`                                              |
-| Logs          | **stdout/stderr only** — plain `console.log`/`console.error`, no log file, no morgan/winston. Logs only exist while the dev server process is running/attached. |
-| DB inspection | `npx prisma studio` inside the backend repo → `http://localhost:5555`                                                                                           |
-
-⚠️ **Do not modify source code in `bnwems-backend-api`.** It's a separate teammate's repo — only run/read it (start the dev server, tail its console output, query its MySQL DB) to debug integration issues from this frontend. If a bug turns out to be backend-side, report the repro steps/findings instead of editing backend code.
-
 ## Project Structure
 
 ````

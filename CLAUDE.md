@@ -8,11 +8,11 @@
 
 Dự án hiện đang ở giai đoạn tập trung dựng giao diện (UI-first). Khi build màn hình mới hoặc chỉnh sửa màn hình hiện có:
 
-- **Không bắt buộc đọc `docs/api/`, không bắt buộc đối chiếu database/schema backend, không bắt buộc tra cứu "Quy tắc nghiệp vụ cốt lõi" ở mục 1** trước khi code — nội dung nghiệp vụ ở mục 1, mục 2 (Quy ước API) và mục 5 (Backend liên quan) trong file này **tạm thời chỉ mang tính tham khảo**, không phải yêu cầu bắt buộc phải tuân theo khi làm UI trong giai đoạn này.
+- **Không bắt buộc đọc `docs/api/`, không bắt buộc đối chiếu database/schema backend, không bắt buộc tra cứu "Quy tắc nghiệp vụ cốt lõi" ở mục 1** trước khi code — nội dung nghiệp vụ ở mục 1 và mục 2 (Quy ước API) trong file này **tạm thời chỉ mang tính tham khảo**, không phải yêu cầu bắt buộc phải tuân theo khi làm UI trong giai đoạn này.
 - Chỉ cần code giao diện khớp đúng ảnh mẫu/thiết kế do người dùng cung cấp (bố cục, màu sắc, thành phần, luồng thao tác) — theo hệ thống thiết kế ở mục 3.
 - Dữ liệu hiển thị dùng mock tùy ý cho khớp giao diện, không cần bám sát field/model backend thật. **Không bắt buộc phải hiển thị in nghiêng hay ghi vào `docs/more-require.md`** (bullet cuối mục 4 tạm ngưng áp dụng) — trừ khi người dùng yêu cầu khác cho từng trường hợp cụ thể.
 - Vẫn giữ nguyên hiệu lực: quy tắc thiết kế (mục 3) và các quy ước không liên quan tới API/backend ở mục 4 (tái dùng component dùng chung, toàn bộ text tiếng Việt, mobile-friendly, scroll-reveal, không hardcode role rời rạc ngoài `usePermission`...).
-- Khi dự án quay lại giai đoạn nối API thật, phục hồi lại toàn bộ ràng buộc ở mục 1/2/4/5 như trước.
+- Khi dự án quay lại giai đoạn nối API thật, phục hồi lại toàn bộ ràng buộc ở mục 1/2/4 như trước.
 
 ## 1. Tổng quan dự án
 
@@ -23,6 +23,7 @@ Dự án hiện đang ở giai đoạn tập trung dựng giao diện (UI-first)
 > Tài liệu nghiệp vụ đầy đủ (use case, ERD, database, Gantt): [Google Doc dự án](https://docs.google.com/document/d/1UYUB5pETgvW0TIbZW9RlYGfz-0uM-kWIbiiPNJpvVgw/edit). Tóm tắt phần liên quan tới frontend ở dưới — khi cần chi tiết quy tắc nghiệp vụ chưa có ở đây, tra lại doc gốc trước khi giả định.
 
 ### Phạm vi nghiệp vụ (module chính)
+
 - Quản lý tài khoản & phân quyền (RBAC)
 - Master data: dịch vụ, thiết bị (catalog), kho, Supplier, bảng giá, chính sách cọc/hoàn cọc/phí phát sinh, quy tắc tiền công
 - Khách hàng & vòng đời Order
@@ -37,6 +38,7 @@ Dự án hiện đang ở giai đoạn tập trung dựng giao diện (UI-first)
 - Audit log, Evidence file (ảnh minh chứng), Notification; Dashboard/báo cáo: **Operational Dashboard** (Manager — trạng thái order/task/thanh toán/kho/vấn đề vận hành) tách biệt với **Administrative Dashboard + Revenue/Order/Inventory Reports** (Admin — audit-oriented).
 
 ### Vai trò & phân quyền
+
 Hệ thống có 4 role; **web frontend (repo này) chỉ phục vụ Admin và Manager** — Leader Staff và Technical Staff dùng app mobile riêng, không thuộc phạm vi repo này nhưng vẫn cần hiểu để dữ liệu hiển thị đúng (vd: tiến độ task do Leader/Technical Staff thực hiện).
 
 - **Admin** (Web only): quyền cao nhất nhưng **không xử lý vận hành hằng ngày**. Chỉ quản lý master data, cấu hình hệ thống/chính sách, phân quyền, xem & audit toàn bộ dữ liệu sau vận hành. Admin **không** trực tiếp ghi nhận cọc/thanh toán, phê duyệt change request, xác nhận hoàn kho hay đóng order — ranh giới này phải tôn trọng khi thiết kế UI/permission gating.
@@ -45,11 +47,13 @@ Hệ thống có 4 role; **web frontend (repo này) chỉ phục vụ Admin và 
 - **Customer và Supplier không có tài khoản đăng nhập** — chỉ là dữ liệu được quản lý; giao tiếp với họ diễn ra ngoài hệ thống (gọi điện, Zalo, Messenger), hệ thống không có cổng khách hàng hay chữ ký điện tử.
 
 ### Vòng đời Order (state machine quan trọng nhất)
+
 Request → Survey → (đặt thêm Supplier nếu thiếu kho) → Quotation cuối + yêu cầu cọc → xác nhận cọc + khóa inventory theo ngày → điều phối nhân sự/phương tiện → xuất kho & nhận hàng Supplier → vận chuyển → thi công + xử lý Change Request → nghiệm thu/bàn giao → thu hồi & kiểm đếm (hỏng/mất) → phụ phí + settlement cuối → hoàn kho + trả Supplier → Manager đóng order → Admin audit. Đây là quy trình nghiệp vụ đầy đủ theo doc gốc — UI/luồng màn hình nên được thiết kế theo các bước này.
 
 **Enum `OrderStatus` hiện tại trong code có 7 giá trị lowercase** (`src/types/order.ts`): `draft`, `confirmed`, `in_progress`, `completed`, `cancelled`, `deposit_paid`, `settlement_pending`. **Không khớp** `docs/api/09-orders.md` (doc vẫn ghi 5 giá trị PascalCase `DRAFT`/`QUOTED`/`CONFIRMED`/`IN_PROGRESS`/`COMPLETED` — có `QUOTED` mà code không có, không có `cancelled`). `deposit_paid`/`settlement_pending` là 2 giá trị runtime phát sinh thêm (khi xác nhận cọc, khi ghi nhận settlement) chưa được khai báo chính thức ở `docs/api/` hay comment schema backend — chi tiết & đề xuất đồng bộ xem [`docs/more-require.md`](docs/more-require.md) mục (h). Doc nghiệp vụ gốc có định nghĩa state machine chi tiết hơn nhiều (`REQUEST_SUBMITTED`, `SURVEY_*`, `INVENTORY_LOCKED`, `HANDOVER_*`, `SETTLEMENT_*`, `CLOSURE_*`...) nhưng **chưa được implement** — khi build các màn hình theo từng giai đoạn vận hành chi tiết (khảo sát, khóa kho, thu hồi, settlement...), cần mở rộng enum này và đồng bộ lại `docs/api/09-orders.md` trước, không tự thêm giá trị enum chỉ ở phía frontend. Trạng thái Inventory (chưa có type/constant riêng trong code, tham khảo doc gốc khi cần): `Available`, `Reserved`, `Checked-out`, `In-use`, `Returned Pending Approval`, `Maintenance`, `Damaged`, `Lost`, `Removed from Available Inventory`.
 
 ### Quy tắc nghiệp vụ cốt lõi (áp dụng đúng khi build tính năng/tính toán liên quan)
+
 - **Đổi ngày**: miễn phí nếu yêu cầu trước >3 ngày so với ngày lắp đặt.
 - **Hủy đơn — hoàn cọc**: ≥30 ngày trước → hoàn 100%; 7–30 ngày → hoàn 50%; <7 ngày → không hoàn.
 - **Bớt thiết bị tại hiện trường**: trừ 100% giá trị thiết bị bị bớt khỏi hóa đơn.
@@ -62,12 +66,15 @@ Request → Survey → (đặt thêm Supplier nếu thiếu kho) → Quotation c
 - **Xóa draft**: Quotation và Supplier Rental/Purchase Order chỉ được xóa khi còn ở trạng thái draft (chưa confirm, chưa gắn Order/Supplier debt active); sau khi confirm/liên kết dữ liệu thì không xóa được nữa, chỉ cập nhật hoặc đổi trạng thái. `docs/api/08-quotations.md` đã có `DELETE /api/v1/quotations/:id` (chỉ xóa được khi chưa `ACCEPTED`). `docs/api/04-suppliers.md` vẫn **chưa có endpoint DELETE** tương ứng cho Supplier Rental/Purchase Order — cần đồng bộ lại doc API/backend trước khi build chức năng xóa cho phần đó trên UI.
 
 ### Giới hạn / Out of scope đáng chú ý
+
 Không có Customer/Supplier self-service portal; không chữ ký điện tử; không tự động đối soát ngân hàng; không AI khảo sát/thiết kế tự động; không tối ưu lịch/tuyến tự động; không RFID/IoT; không phải hệ thống kế toán/payroll đầy đủ; không BI/dự báo nâng cao. Mọi cột mốc quan trọng cần xác nhận thủ công bởi Manager (không tự động hóa).
 
 ### Pattern dữ liệu cần tái sử dụng
+
 Backend dùng nhiều polymorphic relationship — `evidence_attachments (entity_type, entity_id)` dùng chung cho mọi loại ảnh minh chứng, `inventory_transactions (reference_type, reference_id)` dùng chung cho mọi biến động kho. Khi thiết kế type/UI cho file đính kèm hoặc lịch sử biến động kho, theo cùng pattern entity_type/entity_id thay vì tạo field riêng cho từng loại.
 
 ### Prototype UI tham khảo (Manager Portal)
+
 Thư mục `docs/bnwems-manager-portal/` chứa **prototype giao diện Manager Portal** do người dùng tự thiết kế (xuất từ Google AI Studio) — khi người dùng nói "xem/theo prototype" mà không chỉ rõ đường dẫn khác, mặc định hiểu là thư mục này.
 
 - **Bản chất**: app React + Vite + TailwindCSS v4 độc lập (KHÔNG phải Next.js, không dùng chung code với app chính) — chỉ để tham khảo look-and-feel/layout/luồng màn hình, không phải code sản phẩm thật.
@@ -85,53 +92,19 @@ Thư mục `docs/bnwems-manager-portal/` chứa **prototype giao diện Manager 
 - ⚠️ Next.js 16 có breaking changes so với kiến thức huấn luyện — luôn đọc `node_modules/next/dist/docs/` trước khi dùng API mới (đã ghi rõ trong `AGENTS.md`, được import ở đầu file này — không xóa khối đó).
 - Phân khu theo vai trò bằng path segment thật (không phải route group): `auth/` (`/auth/...`), `admin/` (`/admin/...`), `manager/` (`/manager/...`). Không trộn UI/logic giữa hai role trừ khi dùng component dùng chung trong `components/`.
 
-### Quy ước API (bắt buộc — nguồn chuẩn: `docs/api/`)
-
-**Toàn bộ API của website phải tuân theo doc API tại [`docs/api/`](docs/api/)** (đã copy từ repo [Trintrin0408/Context](https://github.com/Trintrin0408/Context.git), branch `feature/fix-api_v1`, thư mục `docs/api/`). Khi viết/sửa bất kỳ `services/*.service.ts`, mở file module tương ứng trong `docs/api/` trước — **không tự suy diễn endpoint, field hay status code nếu chưa có trong doc**; nếu thiếu thông tin thì hỏi lại thay vì tự bịa.
-
-Mục lục module (file → nghiệp vụ):
-
-| File | Nghiệp vụ |
-|---|---|
-| [01-auth.md](docs/api/01-auth.md) | Xác thực, hồ sơ, thông báo |
-| [02-users-roles.md](docs/api/02-users-roles.md) | Người dùng, vai trò, quyền |
-| [03-catalog.md](docs/api/03-catalog.md) | Danh mục thiết bị/dịch vụ + giá |
-| [04-suppliers.md](docs/api/04-suppliers.md) | Nhà cung cấp + công nợ NCC |
-| [05-warehouse-inventory.md](docs/api/05-warehouse-inventory.md) | Tồn kho theo ngày (UC 2.13) + xuất/hoàn trả kho (UC 2.23) — **không còn endpoint liệt kê kho** (`GET /warehouses` đã bị bỏ khỏi doc, web không còn cách tra tên/địa chỉ kho) |
-| [06-policies-wage.md](docs/api/06-policies-wage.md) | Chính sách + quy tắc lương |
-| [07-customers.md](docs/api/07-customers.md) | Khách hàng |
-| [08-quotations.md](docs/api/08-quotations.md) | Báo giá |
-| [09-orders.md](docs/api/09-orders.md) | Đơn hàng (vòng đời) + dashboard vận hành |
-| [10-survey-assignment.md](docs/api/10-survey-assignment.md) | Khảo sát + phân công + giám sát vận hành |
-| [11-payments-settlement.md](docs/api/11-payments-settlement.md) | Thanh toán + quyết toán |
-| [12-mobile-field-ops.md](docs/api/12-mobile-field-ops.md) | App mobile (Leader/Tech) — không thuộc phạm vi web nhưng cần biết để hiển thị đúng dữ liệu |
-| [13-reports.md](docs/api/13-reports.md) | Báo cáo + dashboard quản trị |
-
-Quy ước chung áp dụng cho **mọi** endpoint (chi tiết: [docs/api/README.md](docs/api/README.md)):
-
-- Base URL: `/api/v1`. JSON, UTF-8.
-- Auth: `POST /auth/login` trả 1 JWT (hạn ~7 ngày, **không có refresh token**); mọi request cần đăng nhập gắn `Authorization: Bearer <token>`. Logout = client tự xóa token. Thiếu quyền → `403`.
-- Envelope thành công: `{ success: true, code: "MSG-XX-NN", message, data }`.
-- Envelope lỗi: `{ success: false, code, message, errors?: [{ field, message }] }` (`errors` chỉ có khi lỗi validation theo field).
-- List/pagination: `data` là mảng + `meta: { page, limit, totalCount }` (không còn `total`/`total_pages`); query chuẩn `?page=&limit=&search=&sort_by=&sort_order=`.
-- HTTP status: `200` GET/PUT OK · `201` POST tạo mới · `400` sai input · `401` chưa đăng nhập/token sai · `403` sai quyền · `404` không tìm thấy · `409` xung đột nghiệp vụ · `500` lỗi server.
-- Đa số vô hiệu hóa/đổi trạng thái dùng **`PUT .../status`** (không phải `PATCH`, vd `PUT /users/:id/status`, `PUT /catalog-items/:id/deactivate`) — hệ thống vẫn không hard-delete cho hầu hết entity. Ngoại lệ có `DELETE` thật: `08-quotations.md` → `DELETE /quotations/:id` (chỉ xóa được khi quotation chưa `ACCEPTED`); `10-survey-assignment.md` → `DELETE /tasks/:id` (UC 2.15.4, chỉ xóa được khi task đang `PENDING`) — kiểm tra doc module tương ứng trước khi giả định không có `DELETE`.
-- Ngày: `YYYY-MM-DD`; thời gian: ISO-8601 UTC; tiền: kiểu `number`, đơn vị VNĐ.
-- Mã `code` theo số use case SRS, dạng `MSG-UCnn-nn` (vd `MSG-UC01-03`, `MSG-UC04-01`, `MSG-UC10-04`) — không còn theo prefix module (`MSG-AU`/`MSG-US`/...); xem error code list ở đầu mỗi file `docs/api/*.md` để biết mã chính xác theo UC.
-- ⚠️ `docs/api/README.md` (mirror từ repo gốc) vẫn còn mô tả quy ước cũ (`total/total_pages`, `PATCH .../status`, không `DELETE`, mã prefix `MSG-XX`) — đây là phần upstream chưa đồng bộ lại README khi rewrite từng module; **ưu tiên nội dung trong từng file module cụ thể** (`01-auth.md`...`13-reports.md`) khi có mâu thuẫn với README.
-- [`docs/more-require.md`](docs/more-require.md) tổng hợp các gap/discrepancy thực tế giữa `docs/api/` và backend thật, phát hiện khi đọc trực tiếp source backend lúc build từng màn hình (vd `Order.status` runtime có thêm giá trị ngoài enum khai báo, Quotation không có versioning thật dù doc mô tả có, thiếu GET cho settlement/damage-loss/assignments theo `orderId`...). Tra file này trước khi giả định `docs/api/` mô tả đầy đủ 100% hành vi backend; nếu phát hiện thêm gap mới khi build tính năng, ghi tiếp vào file này theo format mục (a)(b)(c)... đã có.
-
 ## 3. Quy tắc thiết kế
 
 Phong cách tham chiếu: dashboard quản trị tối giản, hiện đại, chuyên nghiệp (kiểu "Bliss Network" trong ảnh mẫu). Mọi UI mới phải tuân theo hệ thống dưới đây để toàn site đồng nhất.
 
 ### Layout tổng thể
+
 - **Sidebar trái cố định, nền tối** (slate/navy đậm, ví dụ `slate-900` / `#0F172A`), chữ và icon màu xám sáng/trắng, item active có nền highlight nhạt + viền/indicator màu accent.
 - **Vùng nội dung chính nền sáng** (trắng hoặc `slate-50`), tương phản rõ với sidebar.
 - **Topbar/header** mỏng, gọn: search, notification, avatar + tên người dùng ở góc phải.
 - Bố cục dạng **card** trên nền content: mỗi khối thông tin (KPI, bảng, chart) là một card nền trắng, `rounded-xl`, shadow rất nhẹ, padding thoáng — tránh viền cứng (border) nặng.
 
 ### Màu sắc
+
 - **Accent chính: xanh blue** (`blue-600`/`#2563EB`) cho nút primary, link, biểu đồ chính.
 - **Màu trạng thái (status badge)** dùng nhất quán toàn site:
   - Xanh lá (`green-500/600`) = hoàn thành / thành công / đã thanh toán
@@ -141,6 +114,7 @@ Phong cách tham chiếu: dashboard quản trị tối giản, hiện đại, ch
 - Badge dạng pill nhỏ, nền màu nhạt (10–15% opacity) + chữ màu đậm cùng tông, không dùng màu nền đặc gắt.
 
 ### Typography & Component
+
 - Font sans-serif hệ thống/Inter, hierarchy rõ: số liệu KPI lớn-đậm, label phụ nhỏ-xám.
 - **KPI Card**: số liệu lớn ở trên, label mô tả dưới, có thể kèm icon hoặc % thay đổi (màu xanh/đỏ theo chiều tăng giảm).
 - **Table**: hàng gọn, có avatar/icon nhận diện ở cột đầu khi liên quan đến người (khách hàng, nhân viên), cột trạng thái dùng badge, có pagination ở cuối, hỗ trợ search + filter phía trên bảng.
@@ -149,6 +123,7 @@ Phong cách tham chiếu: dashboard quản trị tối giản, hiện đại, ch
 - Hạn chế trang trí thừa (gradient, shadow đậm, animation phô trương) — giữ cảm giác **gọn, chuyên nghiệp, đáng tin cậy** vì đây là phần mềm quản lý tài chính/vận hành thật.
 
 ### Responsive
+
 - Một số luồng (ví dụ check-in QR tại tiệc cưới) cần tối ưu cho **mobile/tablet** — giao diện đơn giản hơn, tập trung 1 hành động chính (quét QR, xác nhận check-in).
 
 > Khi tạo component UI mới, ưu tiên tái sử dụng từ `components/ui/` (`Button`, `Table`, `Badge`, `Modal`...) đã liệt kê trong README trước khi viết mới.
@@ -169,26 +144,7 @@ Phong cách tham chiếu: dashboard quản trị tối giản, hiện đại, ch
 - **Toàn bộ text trên giao diện khi generate phải là tiếng Việt** — label, placeholder, tiêu đề, thông báo, tooltip, nội dung nút... Chỉ giữ tiếng Anh cho thuật ngữ kỹ thuật/tên riêng không có bản dịch chuẩn (vd tên field nội bộ, mã trạng thái, tên biến).
 - **Khi build màn hình mà một phần dữ liệu cần thiết backend chưa có** (thiếu field/endpoint so với `docs/api/`): phần nào lấy được từ backend thật thì vẫn lấy qua `services/*.service.ts` như bình thường; phần còn thiếu thì tự sinh mock data hợp lý khớp đúng yêu cầu UI để không chặn tiến độ, đồng thời **luôn ghi yêu cầu bổ sung vào [`docs/more-require.md`](docs/more-require.md)** (nối tiếp theo format mục (a)(b)(c)... đã có trong file) để backend biết cần làm gì. **Phần dữ liệu mock phải hiển thị in nghiêng (`italic`) trên UI** để phân biệt rõ với dữ liệu thật — gỡ in nghiêng ngay khi backend đã bổ sung field/endpoint thật và đã nối API xong. (Rule này áp dụng cho tầng hiển thị khi *biết rõ* backend chưa hỗ trợ — không mâu thuẫn với quy tắc "không tự suy diễn endpoint/field" ở mục 2, vốn áp dụng cho tầng gọi API/service.)
 
-## 5. Backend liên quan (project khác — chỉ đọc/chạy, KHÔNG sửa)
-
-Backend của hệ thống này nằm ở **repo riêng, ngoài thư mục làm việc hiện tại**:
-
-- **Đường dẫn local**: `D:\bnwems-backend-api`
-- **Remote**: `https://github.com/uchihamasuba/bnwems-backend-api`, branch `develop`
-- **Stack**: Node.js (v22 LTS) + Express + TypeScript + **Prisma ORM** (MySQL), kiến trúc layered (`controllers/` → `services/` → Prisma).
-- **Port chạy thật**: `3001` (file `.env` của backend ghi `PORT=3001`, khớp `NEXT_PUBLIC_API_BASE_URL=http://localhost:3001/api/v1` trong `.env.local` của frontend này). `.env.example` của backend ghi `3000` chỉ là giá trị mẫu, không phải giá trị đang chạy.
-- **CORS**: backend chỉ cho phép origin `http://localhost:3000` (đúng port dev của frontend này).
-- **Khởi động**: `npm run dev` (ts-node, auto-reload) trong `D:\bnwems-backend-api`. Dấu hiệu chạy thành công: `Server running on port 3001`.
-- **Log**: backend **chỉ log ra stdout/stderr** qua `console.log`/`console.error` thuần (`src/server.ts`, `src/middlewares/error.middleware.ts`) — **không có file log, không dùng morgan/winston**. Muốn xem log khi debug, phải có tiến trình `npm run dev` đang chạy và đọc output trực tiếp từ tiến trình đó (chạy nền + theo dõi output) — log biến mất khi tiến trình dừng, không truy hồi lại được.
-- **Xem DB trực tiếp**: `npx prisma studio` trong backend repo → `http://localhost:5555`.
-- **Tài khoản seed mặc định**: theo `prisma/seed.ts` của backend (vd SĐT `0987654321` / mật khẩu `password123`) — tham khảo file đó nếu cần tài khoản test, không tự đoán.
-
-### Quy tắc bắt buộc khi debug qua backend
-- **Tuyệt đối không sửa code trong `bnwems-backend-api`** — đây là repo của người khác/ngoài phạm vi được giao. Chỉ được: chạy (`npm run dev` / `npm test` / `prisma studio`), đọc code để hiểu hành vi thật của API, đọc log console, query DB qua Prisma Studio để xác minh dữ liệu.
-- Khi nghi ngờ lỗi nằm ở backend (response sai field, status code không khớp doc, lỗi 500...): chạy backend, tái hiện lỗi, đọc log/stack trace, đối chiếu với `docs/api/` ở repo frontend này — rồi **báo cáo lại cho người dùng** (mô tả lỗi, bước tái hiện, log liên quan) thay vì tự sửa source backend.
-- Nếu cần backend chạy liên tục để frontend gọi API trong lúc debug, khởi chạy `npm run dev` của backend ở tiến trình nền (background) và theo dõi output của tiến trình đó để lấy log theo thời gian thực.
-
-## 6. Workflow
+## 5. Workflow
 
 - Trước khi code: xác nhận lại phạm vi thay đổi nếu yêu cầu chưa rõ ràng (đặc biệt với màn hình tài chính/công nợ — sai số liệu ảnh hưởng nghiệp vụ thật).
 - Khi thêm màn hình mới: tham chiếu phong cách ở mục 3, tái dùng component có sẵn trước khi tạo mới.
