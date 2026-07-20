@@ -14,6 +14,13 @@ import {
 } from '@/mocks/apiFixtures';
 import {
   getAdminCustomers,
+  getAdminCustomerById,
+  addAdminCustomer,
+  updateAdminCustomer,
+  deleteAdminCustomer,
+  nextAdminCustomerId,
+  getAdminCustomerDetail,
+  getOrdersByCustomerId,
   addAdminOrder,
   getAdminOrders,
   getAdminOrderById,
@@ -34,7 +41,13 @@ import {
 import type { ItemCategory } from '@/types/catalog';
 import type { InventoryRow } from '@/types/inventory';
 import type { AuthProfile, AuthUser } from '@/types/auth';
-import type { Customer } from '@/types/customer';
+import type {
+  Customer,
+  CreateCustomerPayload,
+  UpdateCustomerPayload,
+  CustomerSummary,
+  CustomerOrderSummary,
+} from '@/types/customer';
 import type { Order, OrderStatus, OrderPaymentStatus } from '@/types/order';
 import type { PolicyType } from '@/types/policy';
 import type { ChangeRequest, ChangeRequestItem } from '@/types/changeRequest';
@@ -49,15 +62,14 @@ const FIXED_TIMESTAMP = '2026-01-01T00:00:00Z';
 function mapCustomerToApi(c: AdminCustomer): Customer {
   return {
     customerId: c.customerId,
-    customerCode: c.customerId,
     customerName: c.customerName,
     phone: c.phone,
     email: c.email,
     address: c.address,
     notes: c.notes,
-    status: c.status === 'active' ? 'ACTIVE' : 'INACTIVE',
-    createdAt: FIXED_TIMESTAMP,
-    updatedAt: FIXED_TIMESTAMP,
+    status: c.status,
+    totalBookings: c.totalBookings,
+    totalSpent: c.totalSpent,
   };
 }
 
@@ -206,11 +218,148 @@ function resolve(method: string, path: string, params: Record<string, unknown>, 
     return { status: 200, data: envelope(list, { page: 1, limit: list.length, totalCount: list.length }) };
   }
 
-  // ===== Customers =====
+  // ===== Customers (docs/khach_hang_api.md) =====
   if (m === 'GET' && path === '/customers') {
-    const mapped = getAdminCustomers().map(mapCustomerToApi);
-    const { data, meta } = paginate(mapped, params.page as number, params.limit as number);
-    return { status: 200, data: envelope(data, meta) };
+    const statusFilter = params.status as AdminCustomer['status'] | undefined;
+    const search = (params.search as string | undefined)?.trim().toLowerCase();
+    const all = getAdminCustomers();
+    const filtered = all.filter((c) => {
+      if (statusFilter && c.status !== statusFilter) return false;
+      if (!search) return true;
+      return (
+        c.customerName.toLowerCase().includes(search) ||
+        c.customerId.toLowerCase().includes(search) ||
+        c.phone.includes(search) ||
+        c.email.toLowerCase().includes(search)
+      );
+    });
+    const page = (params.page as number) || 1;
+    const limit = (params.limit as number) || 10;
+    const { data } = paginate(filtered, page, limit);
+    return {
+      status: 200,
+      data: {
+        success: true,
+        code: 'MOCK-OK',
+        message: 'Thao tác thành công (dữ liệu mô phỏng)',
+        data: data.map(mapCustomerToApi),
+        meta: {
+          page,
+          limit,
+          totalItems: filtered.length,
+          totalPages: Math.max(1, Math.ceil(filtered.length / limit)),
+          counts: {
+            all: all.length,
+            active: all.filter((c) => c.status === 'active').length,
+            inactive: all.filter((c) => c.status === 'inactive').length,
+          },
+        },
+      },
+    };
+  }
+  if (m === 'POST' && path === '/customers') {
+    const payload = body as CreateCustomerPayload;
+    const created: AdminCustomer = {
+      customerId: nextAdminCustomerId(),
+      customerName: payload.customerName,
+      phone: payload.phone,
+      email: payload.email ?? '',
+      address: payload.address ?? '',
+      notes: payload.notes ?? '',
+      status: payload.status ?? 'active',
+      totalBookings: 0,
+      totalSpent: 0,
+    };
+    addAdminCustomer(created);
+    return { status: 201, data: envelope(mapCustomerToApi(created)) };
+  }
+  {
+    const summaryParams = matchPath('/customers/:customerId/summary', path);
+    if (m === 'GET' && summaryParams) {
+      const detail = getAdminCustomerDetail(summaryParams.customerId);
+      if (!detail) return { status: 404, data: { success: false, code: 'MOCK-404', message: 'Không tìm thấy khách hàng' } };
+      const summary: CustomerSummary = {
+        customer: mapCustomerToApi(detail.customer),
+        createdAt: detail.createdAt,
+        totalValue: detail.totalValue,
+        paidAmount: detail.paidAmount,
+        remainingDebt: detail.remainingDebt,
+        paymentRate: detail.paymentRate,
+        activeOrdersCount: detail.activeOrdersCount,
+      };
+      return { status: 200, data: envelope(summary) };
+    }
+  }
+  {
+    const ordersParams = matchPath('/customers/:customerId/orders', path);
+    if (m === 'GET' && ordersParams) {
+      const detail = getAdminCustomerDetail(ordersParams.customerId);
+      if (!detail) return { status: 404, data: { success: false, code: 'MOCK-404', message: 'Không tìm thấy khách hàng' } };
+      const search = (params.search as string | undefined)?.trim().toLowerCase();
+      const status = params.status as string | undefined;
+      const serviceFilter = params.serviceFilter as string | undefined;
+      const filtered = detail.orders.filter((o) => {
+        if (status && o.status !== status) return false;
+        if (serviceFilter && serviceFilter !== 'all') {
+          if (serviceFilter === 'wedding' && !/(cưới|đính hôn)/i.test(o.event)) return false;
+          if (serviceFilter === 'corporate' && !/(hội nghị|kỷ niệm|gala)/i.test(o.event)) return false;
+        }
+        if (!search) return true;
+        return o.id.toLowerCase().includes(search) || o.event.toLowerCase().includes(search);
+      });
+      const page = (params.page as number) || 1;
+      const limit = (params.limit as number) || 6;
+      const mapped: CustomerOrderSummary[] = filtered.map((o) => ({
+        orderId: o.id,
+        event: o.event,
+        date: o.date,
+        value: o.value,
+        status: o.status,
+        coordinator: o.coordinator,
+      }));
+      const { data } = paginate(mapped, page, limit);
+      return {
+        status: 200,
+        data: {
+          success: true,
+          code: 'MOCK-OK',
+          message: 'Thao tác thành công (dữ liệu mô phỏng)',
+          data,
+          meta: { page, limit, totalItems: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / limit)) },
+        },
+      };
+    }
+  }
+  {
+    const customerIdParams = matchPath('/customers/:customerId', path);
+    if (customerIdParams) {
+      const found = getAdminCustomerById(customerIdParams.customerId);
+      if (m === 'GET') {
+        if (!found) return { status: 404, data: { success: false, code: 'MOCK-404', message: 'Không tìm thấy khách hàng' } };
+        return { status: 200, data: envelope(mapCustomerToApi(found)) };
+      }
+      if (m === 'PUT') {
+        if (!found) return { status: 404, data: { success: false, code: 'MOCK-404', message: 'Không tìm thấy khách hàng' } };
+        const payload = body as UpdateCustomerPayload;
+        updateAdminCustomer(customerIdParams.customerId, {
+          customerName: payload.customerName,
+          phone: payload.phone,
+          email: payload.email ?? '',
+          address: payload.address ?? '',
+          notes: payload.notes ?? '',
+          status: payload.status,
+        });
+        return { status: 200, data: envelope(mapCustomerToApi(getAdminCustomerById(customerIdParams.customerId)!)) };
+      }
+      if (m === 'DELETE') {
+        if (!found) return { status: 404, data: { success: false, code: 'MOCK-404', message: 'Không tìm thấy khách hàng' } };
+        if (getOrdersByCustomerId(customerIdParams.customerId).length > 0) {
+          return { status: 409, data: { success: false, code: 'MOCK-409', message: 'Không thể xóa khách hàng đã có đơn hàng' } };
+        }
+        deleteAdminCustomer(customerIdParams.customerId);
+        return { status: 200, data: envelope({ customerId: customerIdParams.customerId }) };
+      }
+    }
   }
 
   // ===== Orders =====

@@ -5,19 +5,29 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
-import { AdminCustomer, AdminCustomerStatus, nextAdminCustomerId } from '@/mocks/db/customers';
+import type { Customer, CustomerStatus } from '@/types/customer';
+
+export interface CustomerFormValues {
+  customerName: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+  status: CustomerStatus;
+}
 
 interface CustomerFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  editingCustomer?: AdminCustomer | null;
-  onSubmit: (values: Omit<AdminCustomer, 'customerId' | 'totalBookings' | 'totalSpent'>) => void;
+  editingCustomer?: Customer | null;
+  isSubmitting?: boolean;
+  onSubmit: (values: CustomerFormValues) => void;
 }
 
 const textareaClassName =
   'block w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500';
 
-function emptyValues(): Omit<AdminCustomer, 'customerId' | 'totalBookings' | 'totalSpent'> {
+function emptyValues(): CustomerFormValues {
   return { customerName: '', phone: '', email: '', address: '', notes: '', status: 'active' };
 }
 
@@ -27,7 +37,7 @@ interface CustomerFormErrors {
   address?: string;
 }
 
-function validate(values: Omit<AdminCustomer, 'customerId' | 'totalBookings' | 'totalSpent'>): CustomerFormErrors {
+function validate(values: CustomerFormValues): CustomerFormErrors {
   const errors: CustomerFormErrors = {};
   if (!values.customerName.trim()) errors.customerName = 'Vui lòng nhập họ và tên khách hàng.';
   if (!values.phone.trim()) {
@@ -39,7 +49,7 @@ function validate(values: Omit<AdminCustomer, 'customerId' | 'totalBookings' | '
   return errors;
 }
 
-export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }: Readonly<CustomerFormModalProps>) {
+export function CustomerFormModal({ isOpen, onClose, editingCustomer, isSubmitting, onSubmit }: Readonly<CustomerFormModalProps>) {
   const [values, setValues] = useState(emptyValues);
   const [errors, setErrors] = useState<CustomerFormErrors>({});
   const [wasOpen, setWasOpen] = useState(isOpen);
@@ -53,8 +63,8 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
               customerName: editingCustomer.customerName,
               phone: editingCustomer.phone,
               email: editingCustomer.email,
-              address: editingCustomer.address,
-              notes: editingCustomer.notes,
+              address: editingCustomer.address ?? '',
+              notes: editingCustomer.notes ?? '',
               status: editingCustomer.status,
             }
           : emptyValues(),
@@ -75,7 +85,9 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
       <Button variant="secondary" onClick={onClose}>
         Hủy bỏ
       </Button>
-      <Button onClick={handleSubmit}>Lưu hồ sơ</Button>
+      <Button onClick={handleSubmit} isLoading={isSubmitting}>
+        Lưu hồ sơ
+      </Button>
     </>
   );
 
@@ -84,7 +96,6 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
       isOpen={isOpen}
       onClose={onClose}
       title={editingCustomer ? `Chỉnh sửa khách hàng · ${editingCustomer.customerId}` : 'Thêm khách hàng'}
-      subtitle={editingCustomer ? undefined : `Mã khách hàng dự kiến: ${nextAdminCustomerId()}`}
       size="lg"
       footer={footer}
     >
@@ -122,7 +133,7 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, onSubmit }
         <Select
           label="Trạng thái vận hành"
           value={values.status}
-          onChange={(e) => setValues((v) => ({ ...v, status: e.target.value as AdminCustomerStatus }))}
+          onChange={(e) => setValues((v) => ({ ...v, status: e.target.value as CustomerStatus }))}
           options={[
             { value: 'active', label: 'Đang hoạt động' },
             { value: 'inactive', label: 'Tạm ngưng' },

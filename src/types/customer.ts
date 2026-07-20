@@ -1,32 +1,58 @@
-// docs/api/07-customers.md — ĐÃ LỖI THỜI (field tên khách hàng thật là `customerName`, không phải
-// `fullName`). Nguồn: D:\bnwems-backend-api prisma/schema.prisma (model Customer),
-// customer.validator.ts, customer.service.ts.
-export type CustomerStatus = 'ACTIVE' | 'INACTIVE';
+// docs/khach_hang_api.md — khớp response thật từ backend (D:\sep490-backend-api
+// src/modules/sales/customer.service.ts, CustomerDTO). Dùng chung cho luồng chọn khách hàng (tạo
+// đơn/task/báo giá) VÀ trang Khách hàng/Chi tiết khách hàng (/manager/customers) — cùng 1 endpoint
+// /api/v1/customers, không còn 2 khái niệm tách biệt như giai đoạn mock (AdminCustomer cũ).
+export type CustomerStatus = 'active' | 'inactive';
 
 export interface Customer {
   customerId: string;
-  customerCode: string;
+  customerName: string;
+  phone: string;
+  email: string;
+  address: string | null;
+  notes: string | null;
+  status: CustomerStatus;
+  totalBookings: number;
+  totalSpent: number;
+}
+
+export interface CreateCustomerPayload {
+  customerName: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  status?: CustomerStatus;
+}
+
+export interface UpdateCustomerPayload {
   customerName: string;
   phone: string;
   email?: string;
   address?: string;
   notes?: string;
   status: CustomerStatus;
+}
+
+// GET /api/v1/customers/:customerId/summary
+export interface CustomerSummary {
+  customer: Customer;
   createdAt: string;
-  updatedAt: string;
+  totalValue: number;
+  paidAmount: number;
+  remainingDebt: number;
+  paymentRate: number;
+  activeOrdersCount: number;
 }
 
-// POST /api/v1/customers — response chỉ trả { id }
-export interface CreateCustomerPayload {
-  customerName: string;
-  phone: string;
-  email?: string;
-  address?: string;
-}
+export type CustomerOrderStatus = 'NEW' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 
-// PUT /api/v1/customers/:id — customerName bắt buộc (không optional), không có phone
-export interface UpdateCustomerPayload {
-  customerName: string;
-  email?: string;
-  address?: string;
+// GET /api/v1/customers/:customerId/orders
+export interface CustomerOrderSummary {
+  orderId: string;
+  event: string;
+  date: string;
+  value: number;
+  status: CustomerOrderStatus;
+  coordinator: string;
 }

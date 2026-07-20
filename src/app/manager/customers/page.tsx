@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import type { AxiosError } from 'axios';
 import { motion } from 'framer-motion';
-import { Eye, Mail, Pencil, Phone, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertCircle, Eye, Loader2, Mail, Pencil, Phone, Plus, Search, Trash2 } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -12,93 +13,128 @@ import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
 import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
-import CustomerFormModal from '@/components/customers/CustomerFormModal';
+import CustomerFormModal, { type CustomerFormValues } from '@/components/customers/CustomerFormModal';
 import { formatCurrency } from '@/utils/formatCurrency';
-import {
-  AdminCustomer,
-  AdminCustomerStatus,
-  CUSTOMER_STATUS_META,
-  addAdminCustomer,
-  deleteAdminCustomer,
-  getAdminCustomers,
-  nextAdminCustomerId,
-  updateAdminCustomer,
-} from '@/mocks/db/customers';
+import { CUSTOMER_STATUS_META } from '@/constants/customer-status';
+import { customerApiService, type CustomerListMeta } from '@/services/customer.service';
+import type { Customer, CustomerStatus } from '@/types/customer';
 
-// Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminCustomersMock.ts.
+function extractErrorMessage(err: unknown, fallback: string): string {
+  const axiosError = err as AxiosError<{ message?: string; error?: { message?: string } }>;
+  return axiosError.response?.data?.error?.message ?? axiosError.response?.data?.message ?? fallback;
+}
 
-const STATUS_TABS: { value: AdminCustomerStatus | 'all'; label: string }[] = [
+const STATUS_TABS: { value: CustomerStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'Tất cả' },
   { value: 'active', label: 'Đang hoạt động' },
   { value: 'inactive', label: 'Tạm ngưng' },
 ];
 
-export default function AdminCustomersPage() {
-  const [customers, setCustomers] = useState<AdminCustomer[]>(() => getAdminCustomers());
+const EMPTY_COUNTS = { all: 0, active: 0, inactive: 0 };
+
+export default function ManagerCustomersPage() {
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [meta, setMeta] = useState<CustomerListMeta>({ page: 1, limit: 10, totalItems: 0, totalPages: 1, counts: EMPTY_COUNTS });
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusTab, setStatusTab] = useState<AdminCustomerStatus | 'all'>('all');
+  const [statusTab, setStatusTab] = useState<CustomerStatus | 'all'>('all');
   const [page, setPage] = useState(1);
   const limit = 10;
 
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<AdminCustomer | null>(null);
-  const [deletingCustomer, setDeletingCustomer] = useState<AdminCustomer | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const tabCounts: Record<AdminCustomerStatus | 'all', number> = {
-    all: customers.length,
-    active: customers.filter((c) => c.status === 'active').length,
-    inactive: customers.filter((c) => c.status === 'inactive').length,
-  };
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const filteredCustomers = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return customers.filter((c) => {
-      if (statusTab !== 'all' && c.status !== statusTab) return false;
-      if (!term) return true;
-      return (
-        c.customerName.toLowerCase().includes(term) ||
-        c.customerId.toLowerCase().includes(term) ||
-        c.phone.includes(term) ||
-        c.email.toLowerCase().includes(term)
-      );
-    });
-  }, [customers, search, statusTab]);
+  const [reloadTick, setReloadTick] = useState(0);
 
-  const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / limit));
-  const safePage = Math.min(page, totalPages);
-  const pageRows = filteredCustomers.slice((safePage - 1) * limit, safePage * limit);
-  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredCustomers.length, limit };
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset trang khi đổi bộ lọc/tìm kiếm
+    setPage(1);
+  }, [search, statusTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- bật cờ loading khi bắt đầu gọi API thật
+    setIsLoading(true);
+    setLoadError(null);
+    customerApiService
+      .getCustomers({ status: statusTab === 'all' ? undefined : statusTab, search: search || undefined, page, limit })
+      .then((res) => {
+        if (cancelled) return;
+        setCustomers(res.data);
+        if (res.meta) setMeta(res.meta);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(extractErrorMessage(err, 'Không tải được danh sách khách hàng. Vui lòng thử lại.'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [search, statusTab, page, reloadTick]);
+
+  const reload = () => setReloadTick((t) => t + 1);
 
   const openCreateModal = () => {
     setEditingCustomer(null);
+    setFormError(null);
     setIsFormOpen(true);
   };
 
-  const openEditModal = (customer: AdminCustomer) => {
+  const openEditModal = (customer: Customer) => {
     setEditingCustomer(customer);
+    setFormError(null);
     setIsFormOpen(true);
   };
 
-  const handleSubmit = (values: Omit<AdminCustomer, 'customerId' | 'totalBookings' | 'totalSpent'>) => {
-    if (editingCustomer) {
-      updateAdminCustomer(editingCustomer.customerId, values);
-    } else {
-      addAdminCustomer({ customerId: nextAdminCustomerId(), totalBookings: 0, totalSpent: 0, ...values });
+  const handleSubmit = async (values: CustomerFormValues) => {
+    setIsSubmitting(true);
+    setFormError(null);
+    try {
+      if (editingCustomer) {
+        await customerApiService.updateCustomer(editingCustomer.customerId, values);
+      } else {
+        await customerApiService.createCustomer(values);
+      }
+      setIsFormOpen(false);
+      setEditingCustomer(null);
+      reload();
+    } catch (err) {
+      setFormError(extractErrorMessage(err, 'Không thể lưu hồ sơ khách hàng. Vui lòng thử lại.'));
+    } finally {
+      setIsSubmitting(false);
     }
-    setCustomers(getAdminCustomers());
-    setIsFormOpen(false);
-    setEditingCustomer(null);
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!deletingCustomer) return;
-    deleteAdminCustomer(deletingCustomer.customerId);
-    setCustomers((prev) => prev.filter((c) => c.customerId !== deletingCustomer.customerId));
-    setDeletingCustomer(null);
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await customerApiService.deleteCustomer(deletingCustomer.customerId);
+      setDeletingCustomer(null);
+      reload();
+    } catch (err) {
+      setDeleteError(extractErrorMessage(err, 'Không thể xóa khách hàng. Vui lòng thử lại.'));
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
-  const columns: TableColumn<AdminCustomer>[] = [
+  const paginationState: PaginationState = { currentPage: meta.page, totalPages: meta.totalPages, totalItems: meta.totalItems, limit: meta.limit };
+
+  const columns: TableColumn<Customer>[] = [
     {
       key: 'customerId',
       label: 'ID',
@@ -116,7 +152,7 @@ export default function AdminCustomersPage() {
           <Avatar name={row.customerName} size="sm" />
           <div className="min-w-0">
             <p className="truncate font-medium text-slate-800">{row.customerName}</p>
-            <p className="truncate text-xs text-slate-400">{row.address.split(',').slice(-2).join(',').trim()}</p>
+            <p className="truncate text-xs text-slate-400">{row.address ? row.address.split(',').slice(-2).join(',').trim() : '—'}</p>
           </div>
         </div>
       ),
@@ -157,7 +193,7 @@ export default function AdminCustomersPage() {
       label: 'Ghi chú',
       className: 'max-w-[200px]',
       render: (row) => (
-        <span className="line-clamp-2 text-slate-500" title={row.notes}>
+        <span className="line-clamp-2 text-slate-500" title={row.notes ?? undefined}>
           {row.notes || 'Không có ghi chú'}
         </span>
       ),
@@ -186,10 +222,14 @@ export default function AdminCustomersPage() {
           </button>
           <button
             type="button"
-            onClick={() => setDeletingCustomer(row)}
+            onClick={() => {
+              setDeleteError(null);
+              setDeletingCustomer(row);
+            }}
+            disabled={row.totalBookings > 0}
             aria-label="Xóa khách hàng"
-            title="Xóa khách hàng"
-            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+            title={row.totalBookings > 0 ? 'Không thể xóa khách hàng đã có đơn hàng' : 'Xóa khách hàng'}
+            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -229,7 +269,7 @@ export default function AdminCustomersPage() {
                   statusTab === tab.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {tab.label} ({tabCounts[tab.value]})
+                {tab.label} ({meta.counts[tab.value === 'all' ? 'all' : tab.value]})
               </button>
             ))}
           </div>
@@ -245,8 +285,22 @@ export default function AdminCustomersPage() {
           </div>
         </div>
 
+        {loadError && (
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            {loadError}
+          </div>
+        )}
+
         <div className="mt-4 overflow-x-auto">
-          <Table columns={columns} rows={pageRows} rowKey={(row) => row.customerId} />
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Đang tải danh sách khách hàng...
+            </div>
+          ) : (
+            <Table columns={columns} rows={customers} rowKey={(row) => row.customerId} />
+          )}
         </div>
 
         <Pagination pagination={paginationState} onPageChange={setPage} />
@@ -255,12 +309,19 @@ export default function AdminCustomersPage() {
       <CustomerFormModal
         isOpen={isFormOpen}
         editingCustomer={editingCustomer}
+        isSubmitting={isSubmitting}
         onClose={() => {
           setIsFormOpen(false);
           setEditingCustomer(null);
         }}
         onSubmit={handleSubmit}
       />
+      {formError && isFormOpen && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm text-white shadow-lg">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          {formError}
+        </div>
+      )}
 
       <Modal
         isOpen={Boolean(deletingCustomer)}
@@ -269,16 +330,21 @@ export default function AdminCustomersPage() {
         subtitle={deletingCustomer ? `Bạn có chắc muốn xóa hồ sơ "${deletingCustomer.customerName}"? Hành động này không thể hoàn tác.` : undefined}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeletingCustomer(null)}>
+            <Button variant="secondary" onClick={() => setDeletingCustomer(null)} disabled={isDeleting}>
               Hủy
             </Button>
-            <Button variant="danger" onClick={handleDeleteConfirm}>
+            <Button variant="danger" onClick={handleDeleteConfirm} isLoading={isDeleting}>
               Xóa khách hàng
             </Button>
           </>
         }
       >
-        <div />
+        {deleteError && (
+          <div className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            {deleteError}
+          </div>
+        )}
       </Modal>
     </div>
   );
