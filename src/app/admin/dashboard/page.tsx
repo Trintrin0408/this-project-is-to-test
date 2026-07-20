@@ -1,14 +1,12 @@
 'use client';
 
-import Link from 'next/link';
-import { DollarSign, ShoppingCart, FileText, Users, Plus, ChevronDown } from 'lucide-react';
+import { DollarSign, ShoppingCart, FileText, Users } from 'lucide-react';
 import DashboardStats, { KpiCardItem } from '@/components/reports/DashboardStats';
 import RevenueChart from '@/components/reports/RevenueChart';
 import OrderStatusDonut from '@/components/dashboard/OrderStatusDonut';
 import UpcomingEventsCard from '@/components/dashboard/UpcomingEventsCard';
 import RecentOrdersCard from '@/components/dashboard/RecentOrdersCard';
 import StaffOnDutyCard from '@/components/dashboard/StaffOnDutyCard';
-import { Button } from '@/components/ui/Button';
 import Reveal from '@/components/ui/Reveal';
 import {
   getAdminDashboardKpis,
@@ -74,7 +72,7 @@ export default function Page() {
 
   return (
     <div className="p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Tổng quan</h1>
           <p className="mt-1 text-sm text-slate-500">Theo dõi hoạt động kinh doanh và vận hành dịch vụ tiệc cưới.</p>
@@ -82,13 +80,6 @@ export default function Page() {
             Đang hiển thị dữ liệu minh họa (backend chưa kết nối được).
           </p>
         </div>
-        <Link href="/admin/quotations">
-          <Button>
-            <Plus className="h-4 w-4" />
-            Tạo báo giá
-            <ChevronDown className="h-4 w-4" />
-          </Button>
-        </Link>
       </div>
 
       <div className="mt-6">

@@ -285,3 +285,4 @@ mục 4 — quy tắc bắt buộc). Không tự ý commit/push. Báo cáo lại
 # Các màn đã tạo API
 
 * [ ]  ![1784479691488](images/DEMO_CHECKLIST/1784479691488.png)
+

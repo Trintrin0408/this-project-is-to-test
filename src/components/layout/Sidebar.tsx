@@ -63,70 +63,33 @@ const ADMIN_NAV_SECTIONS: NavSection[] = [
     items: [{ label: 'Bảng điều khiển', href: '/admin/dashboard', icon: LayoutGrid }],
   },
   {
-    title: 'KINH DOANH & ĐƠN ĐẶT',
+    title: 'QUẢN LÝ NGƯỜI DÙNG',
     items: [
-      { label: 'Khách hàng', href: '/admin/customers', icon: User },
-      { label: 'Báo giá', href: '/admin/quotations', icon: FileText, badge: 2, badgeColor: 'amber' },
-      { label: 'Hợp đồng', href: '/admin/contracts', icon: FileSignature },
-      {
-        label: 'Quản lý đơn đặt',
-        href: '/admin/orders_audit',
-        icon: ShoppingBag,
-        children: [
-          { label: 'Danh sách đơn đặt', href: '/admin/orders_audit', icon: ClipboardList, badge: 5, badgeColor: 'red' },
-          { label: 'Đặt cọc', href: '/admin/orders_audit/payments', icon: CreditCard },
-          { label: 'Thanh toán', href: '/admin/orders_audit/settlements', icon: Wallet },
-        ],
-      },
+      { label: 'Danh sách người dùng', href: '/admin/settings/users', icon: Users },
+      { label: 'Phân quyền vai trò', href: '/admin/settings/roles', icon: IdCard },
     ],
   },
   {
-    title: 'ĐIỀU PHỐI & VẬN HÀNH',
+    title: 'THIẾT BỊ & TỒN KHO',
     items: [
-      { label: 'Khảo sát hiện trường', href: '/admin/reports/survey', icon: MapPin },
-      { label: 'Kế hoạch & phân công', href: '/admin/coordination/planning', icon: ClipboardList },
-    
+      { label: 'Danh mục thiết bị', href: '/admin/catalog', icon: Package },
+      { label: 'Tồn kho', href: '/admin/inventory/stock-status', icon: Warehouse },
+      { label: 'Bảo trì thiết bị', href: '/admin/inventory/maintenance', icon: Wrench },
     ],
   },
   {
-    title: 'SẢN PHẨM, DỊCH VỤ & KHO',
-    items: [
-      { label: 'Danh mục sản phẩm & thiết bị', href: '/admin/catalog', icon: Package },
-      { label: 'Chính sách nghiệp vụ', href: '/admin/policies', icon: Shield },
-      {
-        label: 'Vận hành kho',
-        href: '/admin/inventory/stock-status',
-        icon: Warehouse,
-        children: [
-          { label: 'Tồn kho doanh nghiệp', href: '/admin/inventory/stock-status', icon: Warehouse },
-          
-          { label: 'Xuất kho', href: '/admin/inventory/outbound', icon: Truck },
-          { label: 'Thu hồi & hoàn kho', href: '/admin/inventory/returns', icon: RotateCcw },
-          
-        ],
-      },
-    ],
+    title: 'CHÍNH SÁCH NGHIỆP VỤ',
+    items: [{ label: 'Chính sách', href: '/admin/policies', icon: Shield }],
   },
   {
-    title: 'NHÀ CUNG CẤP & THUÊ NGOÀI',
+    title: 'BÁO CÁO & KIỂM TOÁN',
     items: [
-      { label: 'Danh sách nhà cung cấp', href: '/admin/suppliers', icon: Building2 },
-      { label: 'Danh mục NCC cung cấp', href: '/admin/catalog/supplier-services', icon: Truck },
-      {
-        label: 'Quản lý thuê ngoài',
-        href: '/admin/suppliers/rental-requests',
-        icon: Store,
-        children: [
-
-          { label: 'Đơn thuê / mua', href: '/admin/suppliers/purchase-orders', icon: FileSignature },
-          { label: 'Trả thiết bị NCC', href: '/admin/suppliers/returns', icon: RotateCcw },
-
-        ],
-      },
-      { label: 'Công nợ nhà cung cấp', href: '/admin/reports/debts', icon: Wallet },
+      { label: 'Báo cáo doanh thu', href: '/admin/reports/revenue', icon: TrendingUp },
+      { label: 'Thống kê đơn hàng', href: '/admin/reports/orders', icon: BarChart3 },
+      { label: 'Báo cáo tồn kho', href: '/admin/reports/inventory', icon: Boxes },
+      { label: 'Nhật ký hệ thống', href: '/admin/settings/audit-log', icon: History },
     ],
   },
-  
 ];
 
 const MANAGER_NAV_SECTIONS: NavSection[] = [
