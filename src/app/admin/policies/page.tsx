@@ -68,14 +68,16 @@ export default function Page() {
       .getPolicies({
         policyType: (typeFilter || undefined) as PolicyType | undefined,
         isActive: statusFilter === '' ? undefined : statusFilter === 'true',
+        search: debouncedSearch || undefined,
+        page: pagination.currentPage,
+        limit: pagination.limit,
       })
       .then((res) => {
-        const term = debouncedSearch.trim().toLowerCase();
-        const filtered = term
-          ? res.data.filter((p: BusinessPolicy) => p.policyName.toLowerCase().includes(term) || p.policyCode.toLowerCase().includes(term))
-          : res.data;
-        updatePagination({ totalItems: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / pagination.limit)) });
-        setPolicies(filtered.slice((pagination.currentPage - 1) * pagination.limit, pagination.currentPage * pagination.limit));
+        setPolicies(res.data);
+        updatePagination({
+          totalItems: res.meta.totalCount,
+          totalPages: Math.max(1, Math.ceil(res.meta.totalCount / res.meta.limit)),
+        });
       })
       .finally(() => setIsLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps

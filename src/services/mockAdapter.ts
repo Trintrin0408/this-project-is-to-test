@@ -696,7 +696,16 @@ function resolve(method: string, path: string, params: Record<string, unknown>, 
     let list = MOCK_POLICIES;
     if (params.policyType) list = list.filter((p) => p.policyType === params.policyType);
     if (params.isActive !== undefined) list = list.filter((p) => p.isActive === (params.isActive === 'true' || params.isActive === true));
-    return { status: 200, data: envelope(list, { page: 1, limit: list.length || 1, totalCount: list.length }) };
+    const search = (params.search as string | undefined)?.trim().toLowerCase();
+    if (search) list = list.filter((p) => p.policyName.toLowerCase().includes(search) || p.policyCode.toLowerCase().includes(search));
+    // page/limit optional (docs/admin_chinhsach_api.md mục 6.4) — không truyền thì trả nguyên danh sách
+    // đã lọc trong 1 "trang" duy nhất, giữ tương thích ngược với chỗ gọi không phân trang (vd
+    // quotations/[id]/page.tsx lấy toàn bộ chính sách active để hiển thị điều khoản chung).
+    const { data, meta } =
+      params.page || params.limit
+        ? paginate(list, params.page as number, params.limit as number)
+        : { data: list, meta: { page: 1, limit: list.length || 1, totalCount: list.length } };
+    return { status: 200, data: envelope(data, meta) };
   }
   if (m === 'POST' && path === '/policies') {
     const payload = body as { policyCode: string; policyName: string; policyType: PolicyType; policyValue: number; unit: string; description?: string };

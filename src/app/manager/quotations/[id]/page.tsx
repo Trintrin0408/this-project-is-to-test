@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
@@ -50,7 +50,8 @@ import { getAdminContracts } from '@/mocks/adminContractsMock';
 import { getSurveyReportByQuotationId } from '@/mocks/db';
 import { getAdminSchedulePlanByQuotationId } from '@/mocks/db/schedulePlans';
 import { getAdminOrders } from '@/mocks/db/orders';
-import { MOCK_POLICIES } from '@/mocks/apiFixtures';
+import { policyApiService } from '@/services/policy.service';
+import type { BusinessPolicy } from '@/types/policy';
 
 // Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminQuotationsMock.ts. Mirror 1:1 của
 // src/app/admin/quotations/[id]/page.tsx dưới path /manager/quotations/[id] — dùng chung mock/store
@@ -86,7 +87,16 @@ export default function ManagerQuotationDetailPage() {
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [isSurveyComparisonOpen, setIsSurveyComparisonOpen] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
+  const [generalPolicies, setGeneralPolicies] = useState<BusinessPolicy[]>([]);
   const quotationCardRef = useRef<HTMLDivElement>(null);
+
+  // "Chính sách chung" đọc từ policyApiService (DEPOSIT/CANCELLATION đang áp dụng ở /admin/policies)
+  // thay vì import thẳng MOCK_POLICIES — xem docs/admin_chinhsach_api.md mục 6.2.
+  useEffect(() => {
+    policyApiService.getPolicies({ isActive: true }).then((res) => {
+      setGeneralPolicies(res.data.filter((p: BusinessPolicy) => p.policyType === 'DEPOSIT' || p.policyType === 'CANCELLATION'));
+    });
+  }, []);
 
   const isLinkedToContract = useMemo(
     () => (detail ? getAdminContracts().some((c) => c.quotationId === detail.row.quotationId) : false),
@@ -116,9 +126,6 @@ export default function ManagerQuotationDetailPage() {
   const equipmentCheckItems = row.items
     .filter((it) => it.category.includes('Thiết bị') || it.category.includes('Thi công'))
     .map((it) => ({ name: it.name, quantity: it.quantity, unit: it.unit ?? '' }));
-  // "Chính sách chung" hiện đúng nội dung chính sách đặt cọc/hủy đơn thật đang quản lý ở
-  // /admin/policies (thay vì text hard-code) — sửa policy trong Admin sẽ phản ánh ngay ở đây.
-  const generalPolicies = MOCK_POLICIES.filter((p) => p.isActive && (p.policyType === 'DEPOSIT' || p.policyType === 'CANCELLATION'));
 
   const refresh = () => setDetail(getAdminQuotationDetail(id));
 

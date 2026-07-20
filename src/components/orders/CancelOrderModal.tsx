@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { formatDate } from '@/utils/formatDate';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { orderApiService } from '@/services/order.service';
+import { policyApiService } from '@/services/policy.service';
 import type { OrderDetail } from '@/types/order';
+import type { BusinessPolicy } from '@/types/policy';
 
 interface CancelOrderModalProps {
   isOpen: boolean;
@@ -19,18 +21,45 @@ interface CancelOrderModalProps {
   onSuccess: () => void;
 }
 
-// Quy tắc nghiệp vụ (CLAUDE.md — Hủy đơn/hoàn cọc): tính theo số ngày còn lại tới ngày sự kiện.
+// Fallback khi chưa tải xong (hoặc backend chưa có đủ) chính sách CANCELLATION — khớp đúng 3 mốc
+// mặc định ở CLAUDE.md mục 1 (≥30 ngày: 100%, 7-30 ngày: 50%, <7 ngày: 0%).
+const DEFAULT_REFUND_TIERS: RefundTier[] = [
+  { minDays: 30, refundPercent: 100, label: 'Hoàn 100% tiền cọc' },
+  { minDays: 7, refundPercent: 50, label: 'Hoàn 50% tiền cọc' },
+  { minDays: -Infinity, refundPercent: 0, label: 'Không hoàn cọc' },
+];
+
+interface RefundTier {
+  minDays: number;
+  refundPercent: number;
+  label: string;
+}
+
+// Đọc tỉ lệ hoàn cọc (%) động từ các chính sách CANCELLATION đang áp dụng (/admin/policies) thay vì
+// hard-code 100/50/0 — xem docs/admin_chinhsach_api.md mục 6.3. Mốc số ngày (30/7) vẫn là hằng số
+// nghiệp vụ cố định vì BusinessPolicy hiện chưa có field ngưỡng ngày cấu trúc (chỉ có trong
+// policyName/description dạng text) — chỉ giá trị % và nhãn hiển thị đọc động theo policyValue/policyName,
+// xếp theo policyValue giảm dần (tỉ lệ hoàn cao nhất ứng với số ngày còn lại nhiều nhất).
+function buildRefundTiers(cancellationPolicies: BusinessPolicy[]): RefundTier[] {
+  if (cancellationPolicies.length < 3) return DEFAULT_REFUND_TIERS;
+  const [full, partial, none] = [...cancellationPolicies].sort((a, b) => b.policyValue - a.policyValue);
+  return [
+    { minDays: 30, refundPercent: full.policyValue, label: full.policyName },
+    { minDays: 7, refundPercent: partial.policyValue, label: partial.policyName },
+    { minDays: -Infinity, refundPercent: none.policyValue, label: none.policyName },
+  ];
+}
+
 // Đây chỉ là ước tính hiển thị cho Manager tham khảo — hệ thống không tự động xử lý hoàn tiền.
-function getRefundPolicyPreview(eventDate: string): { daysLeft: number; refundPercent: number; label: string } {
+function getRefundPolicyPreview(eventDate: string, tiers: RefundTier[]): { daysLeft: number; refundPercent: number; label: string } {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const event = new Date(eventDate);
   event.setHours(0, 0, 0, 0);
   const daysLeft = Math.ceil((event.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (daysLeft >= 30) return { daysLeft, refundPercent: 100, label: 'Hoàn 100% tiền cọc' };
-  if (daysLeft >= 7) return { daysLeft, refundPercent: 50, label: 'Hoàn 50% tiền cọc' };
-  return { daysLeft, refundPercent: 0, label: 'Không hoàn cọc' };
+  const tier = tiers.find((t) => daysLeft >= t.minDays) ?? tiers[tiers.length - 1];
+  return { daysLeft, refundPercent: tier.refundPercent, label: tier.label };
 }
 
 export default function CancelOrderModal({
@@ -45,8 +74,16 @@ export default function CancelOrderModal({
   const [confirmChecked, setConfirmChecked] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refundTiers, setRefundTiers] = useState<RefundTier[]>(DEFAULT_REFUND_TIERS);
 
-  const policy = getRefundPolicyPreview(order.eventDate);
+  useEffect(() => {
+    if (!isOpen) return;
+    policyApiService.getPolicies({ policyType: 'CANCELLATION', isActive: true }).then((res) => {
+      setRefundTiers(buildRefundTiers(res.data));
+    });
+  }, [isOpen]);
+
+  const policy = getRefundPolicyPreview(order.eventDate, refundTiers);
   const estimatedRefund = Math.round((depositCollected * policy.refundPercent) / 100);
 
   const resetAndClose = () => {

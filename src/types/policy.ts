@@ -20,6 +20,10 @@ export interface BusinessPolicy {
 export interface GetPoliciesQuery {
   policyType?: PolicyType;
   isActive?: boolean;
+  /** Tìm theo policyCode/policyName (server-side) — xem docs/admin_chinhsach_api.md mục 6.4. */
+  search?: string;
+  page?: number;
+  limit?: number;
 }
 
 // POST /api/v1/policies
