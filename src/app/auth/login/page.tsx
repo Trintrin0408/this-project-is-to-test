@@ -2,10 +2,11 @@
 
 import { useState, SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { isAxiosError } from 'axios';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { useAuth } from '@/hooks/useAuth';
-import { findMockAccount, MOCK_TOKEN_PREFIX } from '@/mocks/authAccounts';
+import { authApiService } from '@/services/auth.service';
 import { ROLE_DASHBOARD_PATH } from '@/constants/roles';
 
 export default function LoginPage() {
@@ -22,30 +23,28 @@ export default function LoginPage() {
   // khi được mở, không tự nhảy thẳng vào Admin/Manager dashboard chỉ vì còn phiên cũ từ lần trước.
   // Việc chặn truy cập trang đã bảo vệ khi CHƯA đăng nhập vẫn do ProtectedRoute.tsx đảm nhiệm riêng.
 
-  // ⚠️ Đăng nhập tạm KHÔNG gọi backend thật — Aiven cloud DB hiện lệch schema so với
-  // `prisma/schema.prisma` nên `POST /auth/login` luôn trả 400 DB_ERROR (docs/more-require.md mục
-  // (jj)). Dùng 2 tài khoản ảo cố định ở src/mocks/authAccounts.ts cho tới khi backend/DB owner
-  // đồng bộ lại — sau đó khôi phục lại gọi `authApiService.login()` tại đây.
+  // Gọi thẳng backend thật (POST /api/v1/auth/login, D:\sep490-backend-api\src\modules\identity) —
+  // xem docs/login_api.md mục 2.1/5 (đã đối chiếu DB thật, 4 route auth đang hoạt động đúng).
   const handleSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
     setIsSubmitting(true);
 
     try {
-      const account = findMockAccount(username, password);
-      if (!account) {
-        setError('Sai tên đăng nhập hoặc mật khẩu.');
-        return;
-      }
+      const response = await authApiService.login({ username, password });
+      const { token, user } = response.data;
 
-      const dashboardPath = ROLE_DASHBOARD_PATH[account.user.role.roleName];
+      const dashboardPath = ROLE_DASHBOARD_PATH[user.role.roleName];
       if (!dashboardPath) {
         setError('Vai trò tài khoản không được hỗ trợ trên web.');
         return;
       }
 
-      login(`${MOCK_TOKEN_PREFIX}${account.username}`, account.user);
+      login(token, user);
       router.replace(dashboardPath);
+    } catch (err) {
+      const message = isAxiosError(err) ? err.response?.data?.error?.message : undefined;
+      setError(message || 'Sai tên đăng nhập hoặc mật khẩu.');
     } finally {
       setIsSubmitting(false);
     }

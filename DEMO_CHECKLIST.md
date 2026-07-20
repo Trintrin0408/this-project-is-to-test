@@ -281,7 +281,92 @@ Tuân thủ đúng các quy tắc trong CLAUDE.md (đặc biệt mục 0 — gia
 mục 4 — quy tắc bắt buộc). Không tự ý commit/push. Báo cáo lại ngắn gọn sau khi xong.
 ```
 
+## 4. Các màn đã có doc API (`docs/*.md`) — checklist kiểm tra + kết nối backend thật
 
-# Các màn đã tạo API
+> Mỗi màn dưới đây đã có tài liệu API riêng trong `docs/` (viết dựa trên code FE + đối chiếu schema DB
+> thật, phần lớn đã **chốt với Product/Backend** — xem mục 3 của từng file doc). Còn thiếu bước cuối:
+> xác nhận lại doc còn khớp code hiện tại, rồi sửa `services/*.service.ts` gọi backend thật thay vì mock
+> (`NEXT_PUBLIC_MOCK_MODE=false` trong `.env.local`), gỡ hiển thị in nghiêng cho field đã có API thật.
+> Mỗi màn có 2 bước — tick từng bước khi xong, chỉ tick "Kết nối backend" sau khi đã tự test thật trên
+> trình duyệt với backend thật đang chạy (không tick chỉ vì code đã gọi `api.xxx()`, vì service luôn gọi
+> qua lớp này kể cả khi đang ở mock mode — phải xác nhận response thật từ `D:\bnwems-backend-api`).
 
-* [ ]  ![1784479691488](images/DEMO_CHECKLIST/1784479691488.png)
+- [x]  **Danh sách khách hàng** (`/manager/customers`) — doc: [`docs/khach_hang_api.md`](docs/khach_hang_api.md)
+  ![1784479691488](images/DEMO_CHECKLIST/1784479691488.png)
+  - [x]  Kiểm tra API — đối chiếu doc với `src/services/customer.service.ts`
+  - [x]  Kết nối backend — `customerApiService.getCustomers` đã gọi API thật (theo commit `238cf0c`)
+- [x]  **Thêm khách hàng mới** (modal `CustomerFormModal`) — doc: [`docs/taokhachhang_api.md`](docs/taokhachhang_api.md)
+  ![1784481497458](images/DEMO_CHECKLIST/1784481497458.png)
+  - [x]  Kiểm tra API — đối chiếu doc với `src/services/customer.service.ts`
+  - [x]  Kết nối backend — `customerApiService.createCustomer` đã gọi API thật (theo commit `238cf0c`)
+- [ ]  **Danh sách báo giá** (`/manager/quotations`, `/admin/quotations`) — doc: [`docs/danhsachbaogia_api.md`](docs/danhsachbaogia_api.md)
+  ![1784483396073](images/DEMO_CHECKLIST/1784483396073.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/quotation.service.ts`
+  - [ ]  Kết nối backend — test lại màn với backend thật, gỡ mock/in nghiêng nếu còn
+- [ ]  **Tạo báo giá mới** (`CreateQuotationWizardModal`/`admin/quotations/new`) — doc: [`docs/taobaogiamoi_api.md`](docs/taobaogiamoi_api.md)
+  ![1784485970822](images/DEMO_CHECKLIST/1784485970822.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/quotation.service.ts`
+  - [ ]  Kết nối backend — test lại luồng tạo báo giá với backend thật
+- [ ]  **Xem chi tiết báo giá** (`/manager/quotations/[id]`, `/admin/quotations/[id]`) — doc: [`docs/xemchitietbaogia_api.md`](docs/xemchitietbaogia_api.md)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/quotation.service.ts`
+  - [ ]  Kết nối backend — test lại 2 trang nội dung (bản đề xuất + picklist vật tư) với backend thật
+- [ ]  **Danh sách hợp đồng** (`/admin/contracts`) — doc: [`docs/danhsachhopdong_api.md`](docs/danhsachhopdong_api.md)
+  ![1784494048733](images/DEMO_CHECKLIST/1784494048733.png)
+  ![1784495232662](images/DEMO_CHECKLIST/1784495232662.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với service hợp đồng hiện có
+  - [ ]  Kết nối backend — test lại danh sách hợp đồng với backend thật
+- [ ]  **Danh sách đơn đặt** (`/admin/orders_audit`, `/manager/orders`) — doc: [`docs/danhsachdondat_api.md`](docs/danhsachdondat_api.md)
+  ![1784496254229](images/DEMO_CHECKLIST/1784496254229.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/order.service.ts` (doc đang có sửa đổi chưa commit — rà lại trước)
+  - [ ]  Kết nối backend — test lại danh sách đơn đặt với backend thật
+- [ ]  **Tạo đơn đặt lịch tiệc mới** (`CreateOrderModal`) — doc: [`docs/taodondatlichtiecmoi_api.md`](docs/taodondatlichtiecmoi_api.md)
+  ![1784497288967](images/DEMO_CHECKLIST/1784497288967.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/order.service.ts`
+  - [ ]  Kết nối backend — test lại luồng tạo đơn với backend thật
+- [ ]  **Tổng quan sự kiện** (tab trong chi tiết đơn) — doc: [`docs/tongquansukien_api.md`](docs/tongquansukien_api.md)
+  ![1784497746392](images/DEMO_CHECKLIST/1784497746392.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/order.service.ts`
+  - [ ]  Kết nối backend — test lại tab với backend thật
+- [ ]  **Tiến độ sự kiện** (tab Mốc 3 trong chi tiết đơn) — doc: [`docs/tiendosukien_api.md`](docs/tiendosukien_api.md)
+  ![1784498684478](images/DEMO_CHECKLIST/1784498684478.png)
+  ![1784498699035](images/DEMO_CHECKLIST/1784498699035.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/workTask.service.ts`/`order.service.ts`
+  - [ ]  Kết nối backend — test lại tab với backend thật
+- [ ]  **Thiết bị & kho hàng** (tab trong chi tiết đơn) — doc: [`docs/thietbikhohang_api.md`](docs/thietbikhohang_api.md)
+  ![1784500746096](images/DEMO_CHECKLIST/1784500746096.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/inventory.service.ts`
+  - [ ]  Kết nối backend — test lại tab với backend thật
+- [ ]  **Lịch trình & kỹ thuật** (tab trong chi tiết đơn) — doc: [`docs/lichtrinhkythuat_api.md`](docs/lichtrinhkythuat_api.md)
+  ![1784501908715](images/DEMO_CHECKLIST/1784501908715.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/schedulePlan.service.ts`/`workTask.service.ts`
+  - [ ]  Kết nối backend — test lại tab với backend thật
+- [ ]  **Báo giá & hợp đồng** (tab trong chi tiết đơn) — doc: [`docs/baogiavahopdong_api.md`](docs/baogiavahopdong_api.md)
+  ![1784503123405](images/DEMO_CHECKLIST/1784503123405.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/quotation.service.ts`
+  - [ ]  Kết nối backend — test lại tab với backend thật
+- [ ]  **Khảo sát hiện trường** (`/manager/survey`, `/admin/reports/survey`) — doc: [`docs/khaosathientruong_api.md`](docs/khaosathientruong_api.md)
+  ![1784507617438](images/DEMO_CHECKLIST/1784507617438.png)
+  ![1784507888340](images/DEMO_CHECKLIST/1784507888340.png)
+  ![1784507900565](images/DEMO_CHECKLIST/1784507900565.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/survey.service.ts`
+  - [ ]  Kết nối backend — test lại màn khảo sát với backend thật
+- [ ]  **Kế hoạch và phân công** (`/admin/coordination/planning`) — doc: [`docs/kehoachvaphancong_api.md`](docs/kehoachvaphancong_api.md)
+  ![1784507989021](images/DEMO_CHECKLIST/1784507989021.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/schedulePlan.service.ts`
+  - [ ]  Kết nối backend — test lại màn với backend thật
+- [ ]  **Lịch timeline** (`/manager/schedule`) — doc: [`docs/lichtimeline_api.md`](docs/lichtimeline_api.md)
+  ![1784510117219](images/DEMO_CHECKLIST/1784510117219.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/schedulePlan.service.ts`
+  - [ ]  Kết nối backend — test lại lịch timeline với backend thật
+- [ ]  **Danh sách công việc — chi tiết kế hoạch** (`/manager/schedule/tasks`) — doc: [`docs/chitietkehoach_api.md`](docs/chitietkehoach_api.md)
+  ![1784511121404](images/DEMO_CHECKLIST/1784511121404.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/workTask.service.ts`
+  - [ ]  Kết nối backend — test lại màn với backend thật
+- [ ]  **Tồn kho doanh nghiệp** (`/admin/inventory/stock-status`, `/manager/inventory/stock-check`) — doc: [`docs/tonkhodoanhnghiep_api.md`](docs/tonkhodoanhnghiep_api.md)
+  ![1784512218707](images/DEMO_CHECKLIST/1784512218707.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/inventory.service.ts`
+  - [ ]  Kết nối backend — test lại màn với backend thật
+- [ ]  **Pick-list xuất kho** (`/admin/inventory/outbound`) — doc: [`docs/picklistxuatkho_api.md`](docs/picklistxuatkho_api.md)
+  ![1784521627716](images/DEMO_CHECKLIST/1784521627716.png)
+  - [ ]  Kiểm tra API — đối chiếu doc với `src/services/inventory.service.ts`
+  - [ ]  Kết nối backend — test lại pick-list với backend thật
