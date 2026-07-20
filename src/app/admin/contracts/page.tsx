@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Calendar, Eye, FilePen, FileSignature, Plus, RotateCcw, Search, ShoppingBag, Trash2 } from 'lucide-react';
+import { Ban, Calendar, Eye, FileSignature, Plus, RotateCcw, Search, ShoppingBag } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -13,168 +13,142 @@ import { Pagination } from '@/components/ui/Pagination';
 import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
 import DashboardStats, { KpiCardItem } from '@/components/reports/DashboardStats';
-import ContractCreateModal from '@/components/contracts/ContractCreateModal';
+import CreateOrderPickQuotationModal from '@/components/orders/CreateOrderPickQuotationModal';
+import CreateOrderFromQuotationModal from '@/components/quotations/CreateOrderFromQuotationModal';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
 import {
-  AdminContract,
-  CONTRACT_STATUS_META,
-  ContractStatus,
-  createContractFromQuotation,
-  deleteAdminContract,
-  getAdminContracts,
-} from '@/mocks/adminContractsMock';
-import { AdminOrderRow, BOOKING_STATUS_META, PAYMENT_STATUS_META, getAdminOrders } from '@/mocks/db/orders';
+  AdminOrderRow,
+  BOOKING_STATUS_META,
+  BookingStatus,
+  PAYMENT_STATUS_META,
+  PaymentStatus,
+  getAdminOrders,
+  updateAdminOrder,
+} from '@/mocks/db/orders';
+import { AdminQuotationRow, getAdminQuotationById } from '@/mocks/db/quotations';
 
-// Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminContractsMock.ts. Thanh bộ lọc (dropdown
-// trạng thái đơn liên kết, trạng thái thanh toán, khoảng ngày tạo, nút "Làm mới") và các cột "Đơn đặt
-// liên kết"/"Trạng thái Đơn"/"Thanh toán" trong bảng port cách trình bày từ docs/components/Contracts.tsx
-// do người dùng cung cấp (giữ accent xanh blue + component dùng chung của site thay vì indigo gốc).
-// Vẫn giữ nguyên tabs trạng thái hợp đồng (draft/sent/signed/completed) vốn có vì đó là vòng đời riêng
-// của hợp đồng — khác với trạng thái đơn đặt hàng liên kết mà bản tham chiếu dùng làm tab chính.
+// Trang thuần giao diện — theo Hướng A đã chốt ở docs/danhsachhopdong_api.md mục 1.5: khái niệm "Hợp
+// đồng" không có bảng thật nào trong DB và xung đột trực tiếp với luồng Order đã có sẵn
+// (CreateOrderFromQuotationModal ở trang chi tiết báo giá), nên màn này không còn là 1 entity Contract
+// riêng (đã bỏ mocks/adminContractsMock.ts + ContractCreateModal.tsx khỏi luồng chính) — giờ là 1 VIEW
+// LỌC của Order: chỉ hiển thị đơn đặt có `quotationId` (tức được sinh từ 1 báo giá đã duyệt), dùng
+// nguyên `db/orders.ts` làm nguồn dữ liệu duy nhất, không tự sinh lại thông tin khách hàng/sự kiện lần
+// thứ 2 như bản Contract cũ. Route/tên trang giữ nguyên `/admin/contracts` (theo điều hướng Sidebar hiện
+// có) — chỉ đổi lại phần nội dung/dữ liệu bên trong theo đúng thực thể thật.
 
-const STATUS_TABS: { value: ContractStatus | 'all'; label: string }[] = [
+const STATUS_TABS: { value: BookingStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'Tất cả' },
-  { value: 'draft', label: 'Nháp' },
-  { value: 'sent', label: 'Đã gửi' },
-  { value: 'signed', label: 'Đã ký' },
-  { value: 'completed', label: 'Đã thanh lý' },
+  { value: 'NEW', label: BOOKING_STATUS_META.NEW.label },
+  { value: 'CONFIRMED', label: BOOKING_STATUS_META.CONFIRMED.label },
+  { value: 'IN_PROGRESS', label: BOOKING_STATUS_META.IN_PROGRESS.label },
+  { value: 'COMPLETED', label: BOOKING_STATUS_META.COMPLETED.label },
+  { value: 'CANCELLED', label: BOOKING_STATUS_META.CANCELLED.label },
 ];
 
-const ORDER_STATUS_FILTER_OPTIONS = [
-  { value: 'All', label: 'Tất cả trạng thái đơn' },
-  { value: 'NotCreated', label: 'Chưa tạo đơn đặt' },
-  { value: 'NEW', label: `Đơn mới (${BOOKING_STATUS_META.NEW.label})` },
-  { value: 'CONFIRMED', label: `Xác nhận (${BOOKING_STATUS_META.CONFIRMED.label})` },
-  { value: 'IN_PROGRESS', label: `Đang làm (${BOOKING_STATUS_META.IN_PROGRESS.label})` },
-  { value: 'COMPLETED', label: `Hoàn thành (${BOOKING_STATUS_META.COMPLETED.label})` },
-  { value: 'CANCELLED', label: `Đã hủy (${BOOKING_STATUS_META.CANCELLED.label})` },
-];
-
-const PAYMENT_STATUS_FILTER_OPTIONS = [
+const PAYMENT_STATUS_FILTER_OPTIONS: { value: PaymentStatus | 'All'; label: string }[] = [
   { value: 'All', label: 'Tất cả thanh toán' },
-  { value: 'None', label: 'Chưa có đơn hàng' },
   { value: 'UNPAID', label: PAYMENT_STATUS_META.UNPAID.label },
   { value: 'DEPOSITED', label: PAYMENT_STATUS_META.DEPOSITED.label },
   { value: 'PAID', label: PAYMENT_STATUS_META.PAID.label },
 ];
 
 export default function AdminContractsPage() {
-  const [contracts, setContracts] = useState<AdminContract[]>(() => getAdminContracts());
-  const orders = useMemo(() => getAdminOrders(), []);
-  const findLinkedOrder = useCallback(
-    (contract: AdminContract): AdminOrderRow | undefined => orders.find((o) => o.quotationId === contract.quotationId),
-    [orders],
-  );
+  const [orders, setOrders] = useState<AdminOrderRow[]>(() => getAdminOrders());
+  const ordersFromQuotation = useMemo(() => orders.filter((o) => Boolean(o.quotationId)), [orders]);
 
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusTab, setStatusTab] = useState<ContractStatus | 'all'>('all');
-  const [orderStatusFilter, setOrderStatusFilter] = useState('All');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState('All');
+  const [statusTab, setStatusTab] = useState<BookingStatus | 'all'>('all');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatus | 'All'>('All');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [deletingContract, setDeletingContract] = useState<AdminContract | null>(null);
+  const [isPickQuotationOpen, setIsPickQuotationOpen] = useState(false);
+  const [pickedQuotation, setPickedQuotation] = useState<AdminQuotationRow | null>(null);
+  const [cancellingOrder, setCancellingOrder] = useState<AdminOrderRow | null>(null);
 
-  const tabCounts: Record<ContractStatus | 'all', number> = {
-    all: contracts.length,
-    draft: contracts.filter((c) => c.status === 'draft').length,
-    sent: contracts.filter((c) => c.status === 'sent').length,
-    signed: contracts.filter((c) => c.status === 'signed').length,
-    completed: contracts.filter((c) => c.status === 'completed').length,
+  const refreshOrders = useCallback(() => setOrders(getAdminOrders()), []);
+
+  const tabCounts: Record<BookingStatus | 'all', number> = {
+    all: ordersFromQuotation.length,
+    NEW: ordersFromQuotation.filter((o) => o.status === 'NEW').length,
+    CONFIRMED: ordersFromQuotation.filter((o) => o.status === 'CONFIRMED').length,
+    IN_PROGRESS: ordersFromQuotation.filter((o) => o.status === 'IN_PROGRESS').length,
+    COMPLETED: ordersFromQuotation.filter((o) => o.status === 'COMPLETED').length,
+    CANCELLED: ordersFromQuotation.filter((o) => o.status === 'CANCELLED').length,
   };
 
   const kpis = useMemo(() => {
-    let withOrder = 0;
-    let withoutOrder = 0;
-    let totalValue = 0;
-    contracts.forEach((c) => {
-      const linkedOrder = findLinkedOrder(c);
-      totalValue += c.grandTotal;
-      if (!linkedOrder) withoutOrder += 1;
-      else if (linkedOrder.status !== 'CANCELLED') withOrder += 1;
-    });
-    return { withOrder, withoutOrder, totalValue };
-  }, [contracts, findLinkedOrder]);
+    const active = ordersFromQuotation.filter((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED').length;
+    const completed = ordersFromQuotation.filter((o) => o.status === 'COMPLETED').length;
+    const totalValue = ordersFromQuotation.reduce((sum, o) => sum + o.totalPrice, 0);
+    return { active, completed, totalValue };
+  }, [ordersFromQuotation]);
 
   const kpiItems: KpiCardItem[] = [
-    { label: 'Tổng số hợp đồng', value: contracts.length, icon: FileSignature, iconColor: 'blue' },
-    { label: 'Đã thành đơn đặt', value: kpis.withOrder, icon: ShoppingBag, iconColor: 'green' },
-    { label: 'Chưa tạo đơn', value: kpis.withoutOrder, icon: FilePen, iconColor: 'amber' },
+    { label: 'Tổng số đơn từ báo giá', value: ordersFromQuotation.length, icon: FileSignature, iconColor: 'blue' },
+    { label: 'Đang triển khai', value: kpis.active, icon: ShoppingBag, iconColor: 'amber' },
+    { label: 'Đã hoàn thành', value: kpis.completed, icon: FileSignature, iconColor: 'green' },
     { label: 'Tổng giá trị', value: formatCurrency(kpis.totalValue), icon: FileSignature, iconColor: 'pink' },
   ];
 
-  const filteredContracts = useMemo(() => {
+  const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return contracts.filter((c) => {
-      const linkedOrder = findLinkedOrder(c);
-
-      if (statusTab !== 'all' && c.status !== statusTab) return false;
-
-      if (orderStatusFilter === 'NotCreated') {
-        if (linkedOrder) return false;
-      } else if (orderStatusFilter !== 'All' && linkedOrder?.status !== orderStatusFilter) {
-        return false;
-      }
-
-      if (paymentStatusFilter === 'None') {
-        if (linkedOrder) return false;
-      } else if (paymentStatusFilter !== 'All' && linkedOrder?.paymentStatus !== paymentStatusFilter) {
-        return false;
-      }
-
-      if (startDate && c.createdAt < startDate) return false;
-      if (endDate && c.createdAt > endDate) return false;
-
+    return ordersFromQuotation.filter((o) => {
+      if (statusTab !== 'all' && o.status !== statusTab) return false;
+      if (paymentStatusFilter !== 'All' && o.paymentStatus !== paymentStatusFilter) return false;
+      if (startDate && o.weddingDate < startDate) return false;
+      if (endDate && o.weddingDate > endDate) return false;
       if (!term) return true;
       return (
-        c.id.toLowerCase().includes(term) ||
-        c.customerName.toLowerCase().includes(term) ||
-        c.venue.toLowerCase().includes(term) ||
-        c.packageType.toLowerCase().includes(term) ||
-        c.coordinatorName.toLowerCase().includes(term)
+        o.orderId.toLowerCase().includes(term) ||
+        o.customerName.toLowerCase().includes(term) ||
+        o.venue.toLowerCase().includes(term) ||
+        o.coordinatorName.toLowerCase().includes(term)
       );
     });
-  }, [contracts, findLinkedOrder, search, statusTab, orderStatusFilter, paymentStatusFilter, startDate, endDate]);
+  }, [ordersFromQuotation, search, statusTab, paymentStatusFilter, startDate, endDate]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredContracts.length / limit));
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / limit));
   const safePage = Math.min(page, totalPages);
-  const pageRows = filteredContracts.slice((safePage - 1) * limit, safePage * limit);
-  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredContracts.length, limit };
-
-  const handleCreate = (quotationId: string, coordinatorName: string) => {
-    const contract = createContractFromQuotation(quotationId, coordinatorName);
-    setContracts((prev) => [contract, ...prev]);
-    setIsCreateOpen(false);
-  };
-
-  const handleDeleteConfirm = () => {
-    if (!deletingContract) return;
-    deleteAdminContract(deletingContract.id);
-    setContracts((prev) => prev.filter((c) => c.id !== deletingContract.id));
-    setDeletingContract(null);
-  };
+  const pageRows = filteredOrders.slice((safePage - 1) * limit, safePage * limit);
+  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredOrders.length, limit };
 
   const handleResetFilters = () => {
     setSearchInput('');
     setStatusTab('all');
-    setOrderStatusFilter('All');
     setPaymentStatusFilter('All');
     setStartDate('');
     setEndDate('');
   };
 
-  const columns: TableColumn<AdminContract>[] = [
+  const handleQuotationPicked = (quotation: AdminQuotationRow) => {
+    setIsPickQuotationOpen(false);
+    setPickedQuotation(quotation);
+  };
+
+  const handleOrderSaved = () => {
+    setPickedQuotation(null);
+    refreshOrders();
+  };
+
+  const handleCancelConfirm = () => {
+    if (!cancellingOrder) return;
+    updateAdminOrder(cancellingOrder.orderId, { status: 'CANCELLED' });
+    refreshOrders();
+    setCancellingOrder(null);
+  };
+
+  const columns: TableColumn<AdminOrderRow>[] = [
     {
-      key: 'id',
-      label: 'Mã hợp đồng',
+      key: 'orderId',
+      label: 'Mã đơn',
       render: (row) => (
-        <Link href={`/admin/contracts/${row.id}`} className="font-mono text-sm font-semibold text-blue-600 hover:underline">
-          {row.id}
+        <Link href={`/admin/orders_audit/${row.orderId}`} className="font-mono text-sm font-semibold text-blue-600 hover:underline">
+          {row.orderId}
         </Link>
       ),
     },
@@ -203,19 +177,19 @@ export default function AdminContractsPage() {
       ),
     },
     {
-      key: 'grandTotal',
+      key: 'totalPrice',
       label: 'Giá trị',
       className: 'text-right font-bold text-slate-900',
-      render: (row) => formatCurrency(row.grandTotal),
+      render: (row) => formatCurrency(row.totalPrice),
     },
     {
-      key: 'linkedOrder',
-      label: 'Đơn đặt liên kết',
+      key: 'quotationId',
+      label: 'Báo giá gốc',
       render: (row) => {
-        const linkedOrder = findLinkedOrder(row);
-        return linkedOrder ? (
-          <Link href={`/admin/orders_audit/${linkedOrder.orderId}`} className="font-mono text-xs font-semibold text-blue-600 hover:underline">
-            {linkedOrder.orderId}
+        const quotation = row.quotationId ? getAdminQuotationById(row.quotationId) : undefined;
+        return quotation ? (
+          <Link href={`/admin/quotations/${quotation.quotationId}`} className="font-mono text-xs font-semibold text-blue-600 hover:underline">
+            {quotation.code}
           </Link>
         ) : (
           <span className="text-xs italic text-slate-300">—</span>
@@ -223,35 +197,16 @@ export default function AdminContractsPage() {
       },
     },
     {
-      key: 'orderStatus',
-      label: 'Trạng thái Đơn',
+      key: 'status',
+      label: 'Trạng thái đơn',
       className: 'text-center',
-      render: (row) => {
-        const linkedOrder = findLinkedOrder(row);
-        return linkedOrder ? (
-          <Badge variant={BOOKING_STATUS_META[linkedOrder.status].variant}>{BOOKING_STATUS_META[linkedOrder.status].label}</Badge>
-        ) : (
-          <Badge variant="neutral">Chưa tạo đơn</Badge>
-        );
-      },
+      render: (row) => <Badge variant={BOOKING_STATUS_META[row.status].variant}>{BOOKING_STATUS_META[row.status].label}</Badge>,
     },
     {
       key: 'paymentStatus',
       label: 'Thanh toán',
       className: 'text-center',
-      render: (row) => {
-        const linkedOrder = findLinkedOrder(row);
-        return linkedOrder ? (
-          <Badge variant={PAYMENT_STATUS_META[linkedOrder.paymentStatus].variant}>{PAYMENT_STATUS_META[linkedOrder.paymentStatus].label}</Badge>
-        ) : (
-          <span className="text-xs text-slate-300">—</span>
-        );
-      },
-    },
-    {
-      key: 'status',
-      label: 'Trạng thái HĐ',
-      render: (row) => <Badge variant={CONTRACT_STATUS_META[row.status].variant}>{CONTRACT_STATUS_META[row.status].label}</Badge>,
+      render: (row) => <Badge variant={PAYMENT_STATUS_META[row.paymentStatus].variant}>{PAYMENT_STATUS_META[row.paymentStatus].label}</Badge>,
     },
     {
       key: 'actions',
@@ -259,22 +214,24 @@ export default function AdminContractsPage() {
       render: (row) => (
         <div className="flex items-center gap-1">
           <Link
-            href={`/admin/contracts/${row.id}`}
+            href={`/admin/orders_audit/${row.orderId}`}
             aria-label="Xem chi tiết"
             title="Xem chi tiết"
             className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
           >
             <Eye className="h-4 w-4" />
           </Link>
-          <button
-            type="button"
-            onClick={() => setDeletingContract(row)}
-            aria-label="Xóa hợp đồng"
-            title="Xóa hợp đồng"
-            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {row.status !== 'CANCELLED' && row.status !== 'COMPLETED' && (
+            <button
+              type="button"
+              onClick={() => setCancellingOrder(row)}
+              aria-label="Hủy đơn"
+              title="Hủy đơn"
+              className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+            >
+              <Ban className="h-4 w-4" />
+            </button>
+          )}
         </div>
       ),
     },
@@ -285,11 +242,11 @@ export default function AdminContractsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Hợp đồng</h1>
-          <p className="mt-1 text-sm text-slate-500">Quản lý hợp đồng tiệc cưới được khởi tạo từ báo giá đã duyệt và dùng để tạo đơn đặt.</p>
+          <p className="mt-1 text-sm text-slate-500">Danh sách đơn đặt hàng được tạo từ báo giá đã duyệt và dùng để vận hành sự kiện.</p>
         </div>
-        <Button onClick={() => setIsCreateOpen(true)}>
+        <Button onClick={() => setIsPickQuotationOpen(true)}>
           <Plus className="h-4 w-4" />
-          Khởi tạo hợp đồng
+          Tạo đơn từ báo giá
         </Button>
       </div>
 
@@ -328,32 +285,17 @@ export default function AdminContractsPage() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Tìm theo mã HĐ, khách hàng, sảnh..."
+              placeholder="Tìm theo mã đơn, khách hàng, sảnh..."
               className="w-full rounded-md border border-slate-200 bg-slate-50/50 py-2 pl-8 pr-3 text-sm hover:bg-slate-50 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/10"
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400">Đơn hàng:</span>
-              <select
-                value={orderStatusFilter}
-                onChange={(e) => setOrderStatusFilter(e.target.value)}
-                className="rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-2.5 pr-8 text-xs hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {ORDER_STATUS_FILTER_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-1.5">
               <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400">Thanh toán:</span>
               <select
                 value={paymentStatusFilter}
-                onChange={(e) => setPaymentStatusFilter(e.target.value)}
+                onChange={(e) => setPaymentStatusFilter(e.target.value as PaymentStatus | 'All')}
                 className="rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-2.5 pr-8 text-xs hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {PAYMENT_STATUS_FILTER_OPTIONS.map((opt) => (
@@ -370,7 +312,7 @@ export default function AdminContractsPage() {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                title="Từ ngày"
+                title="Ngày tổ chức từ"
                 className="w-28 border-none bg-transparent py-0.5 text-xs text-slate-700 focus:outline-none"
               />
               <span className="text-xs text-slate-300">-</span>
@@ -378,7 +320,7 @@ export default function AdminContractsPage() {
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                title="Đến ngày"
+                title="Ngày tổ chức đến"
                 className="w-28 border-none bg-transparent py-0.5 text-xs text-slate-700 focus:outline-none"
               />
             </div>
@@ -396,26 +338,39 @@ export default function AdminContractsPage() {
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          <Table columns={columns} rows={pageRows} rowKey={(row) => row.id} />
+          <Table columns={columns} rows={pageRows} rowKey={(row) => row.orderId} />
         </div>
 
         <Pagination pagination={paginationState} onPageChange={setPage} />
       </motion.div>
 
-      <ContractCreateModal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} onSubmit={handleCreate} />
+      <CreateOrderPickQuotationModal
+        isOpen={isPickQuotationOpen}
+        onClose={() => setIsPickQuotationOpen(false)}
+        onPicked={handleQuotationPicked}
+      />
+
+      {pickedQuotation && (
+        <CreateOrderFromQuotationModal
+          isOpen={Boolean(pickedQuotation)}
+          onClose={() => setPickedQuotation(null)}
+          quotation={pickedQuotation}
+          onSaved={handleOrderSaved}
+        />
+      )}
 
       <Modal
-        isOpen={Boolean(deletingContract)}
-        onClose={() => setDeletingContract(null)}
-        title="Xóa hợp đồng"
-        subtitle={deletingContract ? `Bạn có chắc muốn xóa hợp đồng "${deletingContract.id}"? Hành động này không thể hoàn tác.` : undefined}
+        isOpen={Boolean(cancellingOrder)}
+        onClose={() => setCancellingOrder(null)}
+        title="Hủy đơn đặt"
+        subtitle={cancellingOrder ? `Bạn có chắc muốn hủy đơn "${cancellingOrder.orderId}"? Đơn sẽ chuyển sang trạng thái Đã hủy, dữ liệu vẫn được giữ lại để đối chiếu.` : undefined}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeletingContract(null)}>
-              Hủy
+            <Button variant="secondary" onClick={() => setCancellingOrder(null)}>
+              Đóng
             </Button>
-            <Button variant="danger" onClick={handleDeleteConfirm}>
-              Xóa hợp đồng
+            <Button variant="danger" onClick={handleCancelConfirm}>
+              Hủy đơn
             </Button>
           </>
         }

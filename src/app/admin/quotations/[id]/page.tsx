@@ -339,7 +339,7 @@ export default function AdminQuotationDetailPage() {
                 ) : (
                   <Button onClick={() => setIsCreateOrderOpen(true)}>
                     <FileSignature className="h-4 w-4" />
-                    Sinh hợp đồng & đơn đặt
+                    Tạo đơn đặt từ báo giá
                   </Button>
                 ))}
             </>

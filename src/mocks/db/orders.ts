@@ -241,8 +241,17 @@ function generateMockOrders(): AdminOrderRow[] {
   // đúng 1 khách thật, customerName/customerPhone lấy TỪ bản ghi đó (không tự sinh độc lập nữa).
   const customers = getAdminCustomers();
 
+  // ~1/2 số đơn (trải đều qua mọi trạng thái NEW/CONFIRMED/IN_PROGRESS/COMPLETED/CANCELLED, không chỉ
+  // nhóm đầu) được gán quotationId từ 1 báo giá ĐÃ DUYỆT thật — mô phỏng đúng luồng "Order sinh từ
+  // Quotation đã duyệt" (Hướng A, docs/danhsachhopdong_api.md mục 1.5). Trước đây KHÔNG có đơn nào có
+  // quotationId trong seed, khiến mọi UI dựa vào liên kết này (nút "Xem đơn đặt" ở trang chi tiết báo
+  // giá, "Đơn đặt từ báo giá" ở /admin/contracts) luôn rỗng dù logic đã viết đúng.
+  const approvedQuotations = getAdminQuotations().filter((q) => q.status === 'approved');
+  let approvedCursor = 0;
+
   return statusSequence.map((status, index) => {
     const customer = customers[index % customers.length];
+    const linkedQuotationId = index % 2 === 0 && approvedCursor < approvedQuotations.length ? approvedQuotations[approvedCursor++].quotationId : undefined;
     const guestCount = 150 + ((index * 41) % 350);
     const totalPrice = 180_000_000 + ((index * 15_500_000) % 420_000_000);
     const dayOffset = status === 'COMPLETED' ? -(10 + index * 3) : 5 + index * 3;
@@ -269,6 +278,7 @@ function generateMockOrders(): AdminOrderRow[] {
       items: buildOrderItems(orderId, totalPrice, venue, status),
       liveChecklist: {},
       disputeLogs: [],
+      quotationId: linkedQuotationId,
     };
   });
 }
