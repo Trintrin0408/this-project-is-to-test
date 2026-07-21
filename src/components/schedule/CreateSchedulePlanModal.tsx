@@ -43,7 +43,8 @@ interface CreateSchedulePlanModalProps {
   onClose: () => void;
   orderId: string;
   defaultLocation?: string;
-  onCreated: () => void;
+  /** `taskName` của loại việc vừa tạo — cho phép trang cha tự quyết định có cần chuyển mốc tiến trình đơn hay không. */
+  onCreated: (taskName: string) => void;
 }
 
 export default function CreateSchedulePlanModal({ isOpen, onClose, orderId, defaultLocation, onCreated }: Readonly<CreateSchedulePlanModalProps>) {
@@ -122,6 +123,7 @@ export default function CreateSchedulePlanModal({ isOpen, onClose, orderId, defa
         notes: notes.trim() || undefined,
       });
       const planId = planRes.data.planId as string;
+      const createdTaskName = workTasks.find((t) => t.taskId === taskId)?.taskName ?? '';
 
       try {
         await Promise.all(
@@ -132,12 +134,12 @@ export default function CreateSchedulePlanModal({ isOpen, onClose, orderId, defa
         );
       } catch {
         setError('Đã tạo lịch trình nhưng gán nhân sự thất bại một phần — vui lòng mở lại kế hoạch vừa tạo và kiểm tra lại.');
-        onCreated();
+        onCreated(createdTaskName);
         setIsSubmitting(false);
         return;
       }
 
-      onCreated();
+      onCreated(createdTaskName);
       onClose();
     } catch (err) {
       const axiosError = err as AxiosError<{ message?: string }>;

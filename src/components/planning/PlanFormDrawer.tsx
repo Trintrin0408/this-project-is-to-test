@@ -483,7 +483,9 @@ export default function PlanFormDrawer({ isOpen, editingGroup, unplannedOrders, 
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
                         >
                           <option value="">Chọn loại việc...</option>
-                          {workTasks.map((t) => (
+                          {workTasks
+                            .filter((t) => t.taskName !== 'Tháo dỡ thiết bị')
+                            .map((t) => (
                             <option key={t.taskId} value={t.taskId}>
                               {t.taskName}
                             </option>

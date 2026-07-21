@@ -113,8 +113,8 @@ const TABS: { id: DetailTab; label: string; icon: typeof Activity; doc?: string 
 
 const LIFECYCLE_STEPS: { id: OrderStatus; label: string; desc: string }[] = [
   { id: 'NEW', label: `1. ${ORDER_STATUS_LABEL.NEW}`, desc: 'Lập đơn & hợp đồng' },
-  { id: 'CONFIRMED', label: `2. ${ORDER_STATUS_LABEL.CONFIRMED}`, desc: 'Xác nhận đặt cọc' },
-  { id: 'IN_PROGRESS', label: `3. ${ORDER_STATUS_LABEL.IN_PROGRESS}`, desc: 'Vận hành & live show' },
+  { id: 'CONFIRMED', label: `2. ${ORDER_STATUS_LABEL.CONFIRMED}`, desc: 'Xác nhận cọc' },
+  { id: 'IN_PROGRESS', label: `3. ${ORDER_STATUS_LABEL.IN_PROGRESS}`, desc: 'Lên kế hoạch và thực hiện' },
   { id: 'COMPLETED', label: `4. ${ORDER_STATUS_LABEL.COMPLETED}`, desc: 'Quyết toán & nghiệm thu' },
 ];
 const LIFECYCLE_ORDER: OrderStatus[] = ['NEW', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'];
@@ -352,6 +352,11 @@ function ManagerOrderDetailContent() {
     setIsConfirmingDeposit(true);
     try {
       await paymentApiService.updateDepositStatus(latestDeposit.depositId, { status: 'SUCCESS' });
+      // Yêu cầu người dùng (2026-07-22): xác nhận cọc thành công tự chuyển mốc tiến trình sang
+      // "2. Đã xác nhận" — chỉ chuyển tiếp (không lùi lại) nên chỉ áp dụng khi đơn còn ở "1. Mới".
+      if (order.orderStatus === 'NEW') {
+        await orderApiService.updateOrderStatus(order.orderId, { orderStatus: 'CONFIRMED' });
+      }
       load();
     } finally {
       setIsConfirmingDeposit(false);
@@ -515,6 +520,22 @@ function ManagerOrderDetailContent() {
   };
 
   const canUnlinkQuotation = approvedQuotationsCount > 1;
+
+  // Yêu cầu người dùng (2026-07-22): chỉ tạo lịch trình loại việc "Lắp đặt thiết bị" (tab "Lịch trình
+  // & Kỹ thuật") mới tự chuyển mốc tiến trình đơn sang "3. Đang thực hiện" — các loại việc khác (khảo
+  // sát, vận chuyển, thu hồi...) không kích hoạt transition này. Chỉ chuyển tiếp (không lùi lại), nên
+  // bỏ qua nếu đơn đã ở IN_PROGRESS/COMPLETED/CANCELLED.
+  const handleSchedulePlanCreated = async (taskName: string) => {
+    const shouldActivate =
+      taskName === 'Lắp đặt thiết bị' &&
+      order.orderStatus !== 'IN_PROGRESS' &&
+      order.orderStatus !== 'COMPLETED' &&
+      order.orderStatus !== 'CANCELLED';
+    if (shouldActivate) {
+      await orderApiService.updateOrderStatus(order.orderId, { orderStatus: 'IN_PROGRESS' });
+    }
+    await load();
+  };
 
   const daysLeft = Math.round((new Date(order.eventDate).getTime() - Date.now()) / 86_400_000);
   const urgencyVariant = daysLeft >= 0 ? getUrgencyBadgeVariant(daysLeft) : null;
@@ -824,12 +845,14 @@ function ManagerOrderDetailContent() {
                             {plan.assignees.map((a) => (
                               <span key={a.userId} className="inline-flex items-center gap-1 rounded bg-white px-2 py-0.5 ring-1 ring-inset ring-slate-200">
                                 {a.fullName} ({a.role === 'LEAD' ? 'Trưởng nhóm' : 'Kỹ thuật viên'})
-                                {a.checkInAt ? (
-                                  <span className="text-emerald-600">· Bắt đầu làm {formatTime(a.checkInAt)}</span>
-                                ) : (
-                                  <span className="italic text-slate-400">· Chưa check-in</span>
-                                )}
-                                {a.checkOutAt && <span className="text-emerald-600">· Hoàn thành {formatTime(a.checkOutAt)}</span>}
+                                {/* Chỉ giờ check-in/out của LEAD ảnh hưởng status của plan (docs/more-require.md mục (ah)) — TECHNICAL không hiện giờ để tránh gây hiểu nhầm là có tác dụng tương tự. */}
+                                {a.role === 'LEAD' &&
+                                  (a.checkInAt ? (
+                                    <span className="text-emerald-600">· Bắt đầu làm {formatTime(a.checkInAt)}</span>
+                                  ) : (
+                                    <span className="italic text-slate-400">· Chưa check-in</span>
+                                  ))}
+                                {a.role === 'LEAD' && a.checkOutAt && <span className="text-emerald-600">· Hoàn thành {formatTime(a.checkOutAt)}</span>}
                               </span>
                             ))}
                           </div>
@@ -1083,8 +1106,9 @@ function ManagerOrderDetailContent() {
                                     {a.phone}
                                   </span>
                                 )}
-                                {a.checkInAt && <span className="text-emerald-600">· Check-in {formatTime(a.checkInAt)}</span>}
-                                {a.checkOutAt && <span className="text-emerald-600">· Check-out {formatTime(a.checkOutAt)}</span>}
+                                {/* Chỉ giờ check-in/out của LEAD ảnh hưởng status của plan (docs/more-require.md mục (ah)) — TECHNICAL không hiện giờ để tránh gây hiểu nhầm là có tác dụng tương tự. */}
+                                {a.role === 'LEAD' && a.checkInAt && <span className="text-emerald-600">· Check-in {formatTime(a.checkInAt)}</span>}
+                                {a.role === 'LEAD' && a.checkOutAt && <span className="text-emerald-600">· Check-out {formatTime(a.checkOutAt)}</span>}
                               </span>
                             ))}
                           </div>
@@ -1556,7 +1580,7 @@ function ManagerOrderDetailContent() {
         onClose={() => setIsCreatePlanOpen(false)}
         orderId={order.orderId}
         defaultLocation={order.location}
-        onCreated={load}
+        onCreated={handleSchedulePlanCreated}
       />
     </div>
   );
