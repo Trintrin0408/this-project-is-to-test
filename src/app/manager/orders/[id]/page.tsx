@@ -11,6 +11,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import RecordSettlementModal from '@/components/orders/RecordSettlementModal';
 import CreateSchedulePlanModal from '@/components/schedule/CreateSchedulePlanModal';
+import CreateQuotationWizardModal from '@/components/quotations/CreateQuotationWizardModal';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate, formatTime } from '@/utils/formatDate';
 import { getUrgencyBadgeVariant } from '@/utils/eventDate';
@@ -190,6 +191,7 @@ export default function ManagerOrderDetailPage() {
   const [linkableQuotations, setLinkableQuotations] = useState<QuotationListItem[]>([]);
   const [selectedLinkQuoteId, setSelectedLinkQuoteId] = useState('');
   const [isLinkingQuote, setIsLinkingQuote] = useState(false);
+  const [isCreateQuotationOpen, setIsCreateQuotationOpen] = useState(false);
   const [isUnlinkingQuote, setIsUnlinkingQuote] = useState(false);
   const [isUnlinkConfirmOpen, setIsUnlinkConfirmOpen] = useState(false);
 
@@ -434,18 +436,19 @@ export default function ManagerOrderDetailPage() {
       .catch(() => setEvidenceModal({ isLoading: false, evidence: null }));
   };
 
-  const handleLinkQuotation = async () => {
-    if (!selectedLinkQuoteId) return;
+  const handleLinkQuotation = async (quotationIdOverride?: string) => {
+    const targetQuotationId = quotationIdOverride ?? selectedLinkQuoteId;
+    if (!targetQuotationId) return;
     setIsLinkingQuote(true);
     try {
-      await orderApiService.updateOrderQuotation(order.orderId, { quotationId: selectedLinkQuoteId });
+      await orderApiService.updateOrderQuotation(order.orderId, { quotationId: targetQuotationId });
 
       // Cộng dồn số lượng từ báo giá vừa liên kết vào danh sách hạng mục hiện có của đơn — tab "Thiết
       // bị & Kho hàng" phải phản ánh đúng số lượng đã báo giá ngay khi đơn được liên kết báo giá, thay
       // vì giữ nguyên order.items cũ (độc lập hoàn toàn với báo giá) như trước. Hạng mục đã có sẵn trên
       // đơn: giữ nguyên đơn giá đã chốt, chỉ cộng thêm số lượng. Hạng mục mới từ báo giá: thêm dòng mới,
       // đơn giá = lineTotal/quantity (giá thực tế sau chiết khấu đã chốt ở báo giá).
-      const quoRes = await quotationApiService.getQuotation(selectedLinkQuoteId);
+      const quoRes = await quotationApiService.getQuotation(targetQuotationId);
       const mergedByItemId = new Map<string, CreateOrderItemPayload>();
       order.items.forEach((it) => {
         mergedByItemId.set(it.itemId, { itemId: it.itemId, quantity: it.quantity, unitPrice: it.unitPrice, source: it.source, notes: it.notes });
@@ -1183,7 +1186,13 @@ export default function ManagerOrderDetailPage() {
                   <div className="mt-4 space-y-3">
                     <p className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500">Đơn này chưa liên kết báo giá nào.</p>
                     <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
-                      <p className="text-xs font-semibold text-slate-700">Liên kết báo giá đã duyệt</p>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-700">Liên kết báo giá đã duyệt</p>
+                        <Button size="sm" variant="secondary" onClick={() => setIsCreateQuotationOpen(true)}>
+                          <Plus className="h-4 w-4" />
+                          Tạo báo giá liên kết
+                        </Button>
+                      </div>
                       {linkableQuotations.length === 0 ? (
                         <p className="mt-2 text-xs italic text-slate-400">Khách hàng chưa có báo giá đã duyệt nào có thể liên kết.</p>
                       ) : (
@@ -1198,7 +1207,7 @@ export default function ManagerOrderDetailPage() {
                               ]}
                             />
                           </div>
-                          <Button size="sm" onClick={handleLinkQuotation} disabled={!selectedLinkQuoteId} isLoading={isLinkingQuote}>
+                          <Button size="sm" onClick={() => handleLinkQuotation()} disabled={!selectedLinkQuoteId} isLoading={isLinkingQuote}>
                             <Link2 className="h-4 w-4" />
                             Liên kết ngay
                           </Button>
@@ -1207,6 +1216,27 @@ export default function ManagerOrderDetailPage() {
                     </div>
                   </div>
                 )}
+
+                <CreateQuotationWizardModal
+                  isOpen={isCreateQuotationOpen}
+                  presetCustomer={{
+                    customerId: order.customerId,
+                    customerName: order.customerName,
+                    phone: order.customerPhone,
+                    email: '',
+                    address: null,
+                    notes: null,
+                    status: 'active',
+                    totalBookings: 0,
+                    totalSpent: 0,
+                  }}
+                  autoApprove
+                  onClose={() => setIsCreateQuotationOpen(false)}
+                  onSaved={(createdQuotationId) => {
+                    setIsCreateQuotationOpen(false);
+                    if (createdQuotationId) handleLinkQuotation(createdQuotationId);
+                  }}
+                />
               </div>
             </motion.div>
           )}
