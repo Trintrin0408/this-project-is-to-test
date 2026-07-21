@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { AxiosError } from 'axios';
-import { ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Button } from '@/components/ui/Button';
 import CustomerFormModal, { CustomerFormValues } from '@/components/customers/CustomerFormModal';
+import QuotationCatalogPicker from '@/components/quotations/QuotationCatalogPicker';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { customerApiService } from '@/services/customer.service';
 import { inventoryApiService } from '@/services/inventory.service';
@@ -137,8 +138,6 @@ export default function CreateQuotationWizardModal({
   // breadcrumb luôn thay vì chỉ nhảy qua, tránh gây hiểu lầm còn có bước chọn khách phía sau.
   const visibleSteps = presetCustomer ? STEPS.filter((s) => s.step !== 1) : STEPS;
   const [items, setItems] = useState<DraftLineItem[]>([]);
-  const [catalogSearch, setCatalogSearch] = useState('');
-  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -166,8 +165,6 @@ export default function CreateQuotationWizardModal({
         .finally(() => setIsLoadingCustomers(false));
     }
     setItems([]);
-    setCatalogSearch('');
-    setOpenCategories(new Set());
     setSaveError(null);
     setIsLoadingCatalog(true);
     inventoryApiService
@@ -178,35 +175,12 @@ export default function CreateQuotationWizardModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, presetCustomer?.customerId]);
 
-  const catalogGroups = useMemo(() => {
-    const term = catalogSearch.trim().toLowerCase();
-    const filtered = term ? catalogItems.filter((it) => (it.itemName ?? '').toLowerCase().includes(term)) : catalogItems;
-    const map = new Map<string, InventoryRow[]>();
-    filtered.forEach((it) => {
-      const category = it.typeName ?? 'Khác';
-      const bucket = map.get(category) ?? [];
-      bucket.push(it);
-      map.set(category, bucket);
-    });
-    return Array.from(map.entries()).map(([category, catalogRows]) => ({ category, items: catalogRows }));
-  }, [catalogItems, catalogSearch]);
-
   const resetState = () => {
     setStep(1);
     setSelectedCustomerId('');
     setItems([]);
-    setCatalogSearch('');
-    setOpenCategories(new Set());
     setSaveError(null);
   };
-
-  const toggleCategory = (category: string) =>
-    setOpenCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(category)) next.delete(category);
-      else next.add(category);
-      return next;
-    });
 
   const handleClose = () => {
     resetState();
@@ -373,61 +347,8 @@ export default function CreateQuotationWizardModal({
               Đơn giá tự điền theo đơn giá thuê niêm yết trong kho — có thể sửa tay trước khi lưu (báo giá là ảnh chụp giá tại thời điểm lập).
             </p>
 
-            <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50/60 p-4">
-              <p className="text-xs font-semibold text-slate-500">Chọn nhanh từ danh mục kho thiết bị có sẵn:</p>
-              <div className="relative mt-3">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={catalogSearch}
-                  onChange={(e) => setCatalogSearch(e.target.value)}
-                  placeholder="Tìm thiết bị theo tên..."
-                  className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-
-              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-                {isLoadingCatalog ? (
-                  <p className="rounded-lg bg-white py-3 text-center text-xs text-slate-400">Đang tải danh mục thiết bị...</p>
-                ) : (
-                  <>
-                    {catalogGroups.map((group) => {
-                      const isOpenGroup = catalogSearch.trim() !== '' || openCategories.has(group.category);
-                      return (
-                        <div key={group.category} className="rounded-lg border border-slate-200 bg-white">
-                          <button
-                            type="button"
-                            onClick={() => toggleCategory(group.category)}
-                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
-                          >
-                            <span>
-                              {group.category} <span className="font-normal text-slate-400">({group.items.length})</span>
-                            </span>
-                            <ChevronDown className={`h-3.5 w-3.5 flex-shrink-0 text-slate-400 transition-transform ${isOpenGroup ? 'rotate-180' : ''}`} />
-                          </button>
-                          {isOpenGroup && (
-                            <div className="flex flex-wrap gap-2 border-t border-slate-100 p-3">
-                              {group.items.map((catalogItem) => (
-                                <button
-                                  key={catalogItem.itemId}
-                                  type="button"
-                                  onClick={() => addCatalogItem(catalogItem)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                                >
-                                  <Plus className="h-3.5 w-3.5" />
-                                  {catalogItem.itemName} <span>({formatCurrency(catalogItem.rentalPrice ?? 0)})</span>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {catalogGroups.length === 0 && (
-                      <p className="rounded-lg bg-white py-3 text-center text-xs italic text-slate-400">Không tìm thấy thiết bị phù hợp.</p>
-                    )}
-                  </>
-                )}
-              </div>
+            <div className="mt-5">
+              <QuotationCatalogPicker catalogItems={catalogItems} isLoading={isLoadingCatalog} onPick={addCatalogItem} />
             </div>
 
             <div className="mt-5 overflow-x-auto rounded-lg border border-slate-100">

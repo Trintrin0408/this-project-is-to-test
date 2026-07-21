@@ -179,3 +179,39 @@ export interface CloseOrderPayload {
 export interface UpdateOrderQuotationPayload {
   quotationId: string | null;
 }
+
+// POST /api/v1/orders/:orderId/export-equipment — docs/xuatthietbi_tubaogia_api.md mục 4.3 (bản v2:
+// reconcile theo báo giá liên kết — đồng bộ order_items theo quotation_items rồi xuất bù OUTBOUND /
+// thu hồi chênh lệch INBOUND; bấm lặp lại hợp lệ, no-op trả unchanged: true). Chỉ dòng source=INTERNAL
+// mới đụng kho; dòng SUPPLIER trả về ở skippedSupplierItems.
+export interface ExportEquipmentPayload {
+  notes?: string;
+}
+
+export interface ExportEquipmentMovement {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  movementType: 'OUTBOUND' | 'INBOUND';
+}
+
+export interface ExportEquipmentResult {
+  orderId: string;
+  orderCode: string;
+  syncedQuotationId: string;
+  syncedQuotationCode: string;
+  pickedUpAt: string | null;
+  pickedUpBy: string | null;
+  movements: ExportEquipmentMovement[];
+  skippedSupplierItems: { itemId: string; itemName: string; quantity: number }[];
+  unchanged: boolean;
+}
+
+// Shape `details.items` của lỗi 400 "Tồn kho không đủ để xuất thiết bị" (envelope lỗi chung
+// { error: { code, message, details } }).
+export interface ExportEquipmentShortageItem {
+  itemId: string;
+  itemName: string;
+  required: number;
+  available: number;
+}

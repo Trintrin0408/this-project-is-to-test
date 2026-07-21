@@ -5,16 +5,21 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import type { AxiosError } from 'axios';
-import { Check, CheckCircle2, ChevronRight, Copy, FileSignature, Mail, MapPin, Pencil, Phone, Printer, Trash2, X } from 'lucide-react';
+import { Check, CheckCircle2, ChevronRight, Copy, FileSignature, Mail, MapPin, PackageCheck, Pencil, Phone, Printer, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
 import { quotationApiService } from '@/services/quotation.service';
+import { inventoryApiService } from '@/services/inventory.service';
+import { orderApiService } from '@/services/order.service';
 import type { QuotationDetailApi, QuotationDetailItem } from '@/types/quotation';
+import type { ExportEquipmentShortageItem } from '@/types/order';
+import type { InventoryRow } from '@/types/inventory';
 import { getAdminContracts } from '@/mocks/adminContractsMock';
 import CreateOrderFromQuotationModal from '@/components/quotations/CreateOrderFromQuotationModal';
+import QuotationCatalogPicker from '@/components/quotations/QuotationCatalogPicker';
 import { policyApiService } from '@/services/policy.service';
 import type { BusinessPolicy } from '@/types/policy';
 
@@ -38,11 +43,12 @@ function formatPolicyUnit(unit: string): string {
 // hiển thị dữ liệu bịa này (QuotationPicklistView, InventoryAvailabilityPanel, SurveyComparisonPanel)
 // và 2 hàm sinh dữ liệu tương ứng trong db/quotations.ts vì không còn nơi nào dùng.
 //
-// Sửa hạng mục inline: giữ lại (đổi/xóa số lượng, đơn giá, giảm giá của hạng mục ĐÃ có trong báo giá,
-// gọi PUT /quotations/:id thật) nhưng đã bỏ 2 cách "thêm dòng mới" cũ (nhập tay tự do + chọn nhanh từ
-// QUOTATION_CATALOGUE) vì cả 2 đều tạo dòng KHÔNG có itemId thật — vi phạm NOT NULL FK trên
-// quotation_items, cùng vấn đề đã chốt Hướng A ở docs/taobaogiamoi_api.md mục 3.1. Thêm hạng mục mới
-// cho báo giá đã tồn tại tạm thời ngoài phạm vi (cần màn hình chọn catalog giống modal Tạo báo giá mới).
+// Sửa hạng mục inline: đổi/xóa số lượng, đơn giá, giảm giá của hạng mục có sẵn + THÊM hạng mục mới từ
+// catalog thật (QuotationCatalogPicker, dùng chung với modal Tạo báo giá mới — mọi dòng thêm vào luôn
+// gắn itemId thật, đúng Hướng A đã chốt ở docs/taobaogiamoi_api.md mục 3.1), lưu qua PUT /quotations/:id
+// thật (gửi nguyên mảng items thay thế toàn bộ). Backend đã nới lỏng điều kiện sửa (xem
+// docs/more-require.md mục (ae.3)): chỉ còn chặn báo giá REJECTED hoặc có Order liên kết đã
+// COMPLETED/CANCELLED — các trạng thái khác (kể cả APPROVED đã gắn Order) đều sửa được.
 //
 // Cập nhật 2026-07-21: "Sinh đơn đặt từ báo giá" đã nối lại API thật — CreateOrderFromQuotationModal
 // viết lại nhận đúng QuotationDetailApi + gọi orderApiService.createOrder() thật (xem
@@ -87,10 +93,15 @@ export default function ManagerQuotationDetailPage() {
   const [isEditingItems, setIsEditingItems] = useState(false);
   const [editItems, setEditItems] = useState<EditableLineItem[]>([]);
   const [editNotes, setEditNotes] = useState('');
+  const [catalogItems, setCatalogItems] = useState<InventoryRow[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [stockShortage, setStockShortage] = useState<ExportEquipmentShortageItem[] | null>(null);
   const [generalPolicies, setGeneralPolicies] = useState<BusinessPolicy[]>([]);
   const quotationCardRef = useRef<HTMLDivElement>(null);
 
@@ -141,6 +152,34 @@ export default function ManagerQuotationDetailPage() {
   const canDelete = detail.status !== 'approved';
   const canApproveReject = detail.status === 'draft';
   const canCreateOrder = detail.status === 'approved' && !detail.linkedOrderId;
+  // Nút "Xuất thiết bị" — docs/xuatthietbi_tubaogia_api.md mục 5.1: chỉ khi Đã duyệt + đã có đơn liên kết.
+  const canExportEquipment = detail.status === 'approved' && !!detail.linkedOrderId;
+
+  const handleExportEquipment = async () => {
+    if (!detail.linkedOrderId || isExporting) return;
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      // Backend v2 reconcile theo báo giá — bấm lặp lại hợp lệ, không còn 409 "đã xuất trước đó"
+      // (docs/xuatthietbi_tubaogia_api.md mục 4.2 bản v2). Toast hiển thị ở trang đích qua ?exported=
+      // (trang đơn tự xóa param sau khi hiện).
+      const res = await orderApiService.exportEquipment(detail.linkedOrderId);
+      const outcome = res.data?.unchanged ? 'unchanged' : 'success';
+      router.push(`/manager/orders/${detail.linkedOrderId}?tab=items&exported=${outcome}`);
+    } catch (err) {
+      const axiosError = err as AxiosError<{ error?: { message?: string; details?: { items?: ExportEquipmentShortageItem[] } } }>;
+      const status = axiosError.response?.status;
+      const message = axiosError.response?.data?.error?.message;
+      const shortageItems = axiosError.response?.data?.error?.details?.items;
+      if (status === 400 && shortageItems && shortageItems.length > 0) {
+        setStockShortage(shortageItems);
+      } else {
+        // Gồm cả 409 đơn CANCELLED/COMPLETED hoặc chưa liên kết báo giá — hiện nguyên văn từ backend
+        setExportError(message ?? 'Xuất thiết bị thất bại. Vui lòng thử lại.');
+      }
+      setIsExporting(false);
+    }
+  };
 
   const handleApprove = async () => {
     if (!canApproveReject || isUpdatingStatus) return;
@@ -202,8 +241,8 @@ export default function ManagerQuotationDetailPage() {
     }
   };
 
-  // ---- Sửa hạng mục inline — chỉ sửa số lượng/đơn giá/giảm giá hoặc xóa dòng có sẵn, không thêm dòng
-  // mới (mọi hạng mục bắt buộc gắn itemId thật, xem giải thích đầu file) ----
+  // ---- Sửa hạng mục inline — sửa số lượng/đơn giá/giảm giá, xóa dòng, hoặc thêm dòng mới từ catalog
+  // thật (mọi hạng mục bắt buộc gắn itemId thật, xem giải thích đầu file) ----
   const startEditingItems = () => {
     setEditItems(
       detail.items.map((it) => ({
@@ -217,11 +256,39 @@ export default function ManagerQuotationDetailPage() {
     setDetailPage(1);
     setSaveError(null);
     setIsEditingItems(true);
+    if (catalogItems.length === 0) {
+      setIsLoadingCatalog(true);
+      inventoryApiService
+        .getInventory({ limit: 200 })
+        .then((res) => setCatalogItems(res.data ?? []))
+        .catch(() => setCatalogItems([]))
+        .finally(() => setIsLoadingCatalog(false));
+    }
   };
 
   const updateEditItem = (quotationItemId: string, patch: Partial<EditableLineItem>) =>
     setEditItems((prev) => prev.map((it) => (it.quotationItemId === quotationItemId ? { ...it, ...patch } : it)));
   const removeEditItem = (quotationItemId: string) => setEditItems((prev) => prev.filter((it) => it.quotationItemId !== quotationItemId));
+  const addEditItemFromCatalog = (catalogItem: InventoryRow) =>
+    setEditItems((prev) => [
+      ...prev,
+      {
+        // Dòng mới chưa tồn tại trên backend — quotationItemId tạm chỉ dùng làm React key/selector cục
+        // bộ, khi lưu chỉ gửi itemId/quantity/price/discount nên giá trị này không đi lên server.
+        quotationItemId: `new-${Date.now()}-${catalogItem.itemId}`,
+        itemId: catalogItem.itemId,
+        itemName: catalogItem.itemName ?? catalogItem.itemCode ?? catalogItem.itemId,
+        categoryName: catalogItem.categoryName ?? catalogItem.typeName ?? 'Khác',
+        unit: catalogItem.unit ?? 'Cái',
+        quantity: 1,
+        price: catalogItem.rentalPrice ?? 0,
+        discount: 0,
+        lineTotal: catalogItem.rentalPrice ?? 0,
+        quantityInput: '1',
+        priceInput: String(catalogItem.rentalPrice ?? 0),
+        discountInput: '0',
+      },
+    ]);
 
   const editSubtotal = editItems.reduce((sum, it) => sum + (Number(it.priceInput) || 0) * (Number(it.quantityInput) || 0), 0);
   const editDiscountTotal = editItems.reduce((sum, it) => sum + (Number(it.discountInput) || 0), 0);
@@ -251,11 +318,9 @@ export default function ManagerQuotationDetailPage() {
       setIsEditingItems(false);
       load();
     } catch (err) {
-      // Backend chặn cứng PUT khi báo giá không còn ở trạng thái draft (400 "Chỉ có thể sửa báo giá khi
-      // còn ở trạng thái nháp (DRAFT)") — hiện nút "Sửa hạng mục" ở mọi trạng thái theo yêu cầu người
-      // dùng, nhưng phải hiện đúng lỗi thật từ backend thay vì thông báo chung chung, vì lưu sẽ luôn thất
-      // bại với báo giá đã duyệt/từ chối cho tới khi Backend nới lỏng ràng buộc này (xem
-      // docs/more-require.md mục (ae)).
+      // Backend vẫn còn 2 trường hợp chặn PUT (báo giá REJECTED, hoặc Order liên kết đã
+      // COMPLETED/CANCELLED — xem docs/more-require.md mục (ae.3)) và validate chiết khấu không được
+      // vượt giá trị dòng — hiện đúng nguyên văn lỗi thật từ backend thay vì thông báo chung chung.
       const axiosError = err as AxiosError<{ message?: string; error?: { message?: string } }>;
       setSaveError(axiosError.response?.data?.error?.message ?? axiosError.response?.data?.message ?? 'Lưu thay đổi thất bại. Vui lòng thử lại.');
     } finally {
@@ -307,6 +372,12 @@ export default function ManagerQuotationDetailPage() {
                   </Button>
                 </Link>
               )}
+              {canExportEquipment && (
+                <Button onClick={handleExportEquipment} isLoading={isExporting}>
+                  <PackageCheck className="h-4 w-4" />
+                  Xuất thiết bị
+                </Button>
+              )}
               {canCreateOrder && (
                 <Button onClick={() => setIsCreateOrderOpen(true)}>
                   <FileSignature className="h-4 w-4" />
@@ -347,6 +418,10 @@ export default function ManagerQuotationDetailPage() {
           )}
         </div>
       </div>
+
+      {exportError && (
+        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 ring-1 ring-inset ring-red-600/20 print:hidden">{exportError}</p>
+      )}
 
       <div className="mt-6">
         {!isEditingItems && detailPage === 2 ? (
@@ -530,9 +605,7 @@ export default function ManagerQuotationDetailPage() {
                     </tbody>
                   </table>
                 </div>
-                <p className="text-xs italic text-slate-400">
-                  Chưa hỗ trợ thêm hạng mục mới ở đây — mọi hạng mục bắt buộc gắn thiết bị thật trong kho, cần màn chọn catalog giống modal "Tạo báo giá mới".
-                </p>
+                <QuotationCatalogPicker catalogItems={catalogItems} isLoading={isLoadingCatalog} onPick={addEditItemFromCatalog} />
               </div>
             ) : (
               <div className="mt-6">
@@ -543,7 +616,7 @@ export default function ManagerQuotationDetailPage() {
                       type="button"
                       onClick={startEditingItems}
                       aria-label="Sửa hạng mục"
-                      title={detail.status !== 'draft' ? 'Báo giá đã duyệt/từ chối — backend chỉ cho lưu khi còn ở trạng thái nháp' : 'Sửa hạng mục'}
+                      title={detail.status === 'rejected' ? 'Báo giá đã bị từ chối — backend sẽ không cho lưu thay đổi' : 'Sửa hạng mục'}
                       className="text-slate-400 hover:text-blue-600"
                     >
                       <Pencil className="h-4 w-4" />
@@ -644,6 +717,43 @@ export default function ManagerQuotationDetailPage() {
         }
       >
         <div />
+      </Modal>
+
+      {/* Lỗi 400 thiếu tồn kho — doc mục 5.5 (v2): required là phần cần xuất THÊM so với đã xuất
+          trước đó, backend rollback toàn bộ lần chạy này nên chưa có thay đổi nào được ghi nhận. */}
+      <Modal
+        isOpen={!!stockShortage}
+        onClose={() => setStockShortage(null)}
+        title="Tồn kho không đủ để xuất thiết bị"
+        subtitle="Chưa có thay đổi nào được ghi nhận trong lần xuất này — các hạng mục dưới đây đang thiếu tồn kho khả dụng."
+        footer={
+          <Button variant="secondary" onClick={() => setStockShortage(null)}>
+            Đóng
+          </Button>
+        }
+      >
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-left text-xs">
+            <thead className="border-b border-slate-100 bg-slate-50 font-bold uppercase tracking-wider text-slate-600">
+              <tr>
+                <th className="px-3 py-2.5">Tên hạng mục</th>
+                <th className="w-24 px-3 py-2.5 text-center">Cần xuất thêm</th>
+                <th className="w-24 px-3 py-2.5 text-center">Khả dụng</th>
+                <th className="w-24 px-3 py-2.5 text-center">Thiếu</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {(stockShortage ?? []).map((item) => (
+                <tr key={item.itemId}>
+                  <td className="px-3 py-2.5 font-semibold text-slate-900">{item.itemName}</td>
+                  <td className="px-3 py-2.5 text-center text-slate-600">{item.required}</td>
+                  <td className="px-3 py-2.5 text-center text-slate-600">{item.available}</td>
+                  <td className="px-3 py-2.5 text-center font-bold text-red-600">{item.required - item.available}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Modal>
 
       <CreateOrderFromQuotationModal
