@@ -666,13 +666,6 @@ export default function ManagerOrderDetailPage() {
                   </p>
                 </div>
               </div>
-
-              <div>
-                <h5 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-900">Phân công khảo sát báo giá</h5>
-                <p className="rounded-lg border border-dashed border-slate-200 p-3 text-xs italic text-slate-500">
-                  Chưa nối API thật — backend chưa seed danh mục công việc &quot;Khảo sát hiện trường&quot; (`work_tasks`), cần trước khi dùng được luồng phân công qua `schedule_plans` (xem docs/more-require.md mục (f)).
-                </p>
-              </div>
             </motion.div>
           )}
 

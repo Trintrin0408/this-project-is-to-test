@@ -19,14 +19,10 @@ import type { QuotationDetailApi } from '@/types/quotation';
 // AdminSurveyReport nữa. Khối "Danh sách thiết bị báo giá nháp" (2026-07-21, theo yêu cầu người dùng)
 // đã đổi từ dữ liệu mock cứng sang đọc thật: `survey_reports` không có bảng lưu thiết bị báo giá riêng,
 // nhưng dữ liệu này thật ra có sẵn ở báo giá (quotation) đã liên kết với đơn (`orders.quotationId` →
-// `GET /quotations/:id`, đã có đủ items[] thật) — không cần Backend làm gì thêm. Khối "Chiều cao
-// trần"/"Công suất điện" vẫn hoàn toàn thiếu dữ liệu thật (không có cột nào trong `survey_reports`) —
-// giữ nguyên mock in nghiêng, xem docs/more-require.md mục (t).
-
-const MOCK_CEILING_HEIGHT = '4.5 m';
-const MOCK_POWER_CAPACITY = '3-phase, 63A';
-
-const EXTRA_MOCK_IMAGE = 'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=400&h=280&fit=crop';
+// `GET /quotations/:id`, đã có đủ items[] thật) — không cần Backend làm gì thêm.
+// 2026-07-21 (theo yêu cầu người dùng): đã ẩn hẳn "Chiều cao trần"/"Công suất nguồn điện" (mock, không
+// có cột thật), "Các yêu cầu bổ sung" (additionalRequests), và ảnh minh họa mẫu ở khối "Minh chứng
+// hình ảnh" khỏi UI — giờ chỉ hiện đúng 1 ảnh thật qua evidence_id nếu có, không chèn ảnh giả nữa.
 
 const SURVEY_STATUS_META: Record<SurveyStatus, { label: string; variant: BadgeVariant }> = {
   DRAFT: { label: 'Bản nháp', variant: 'neutral' },
@@ -147,7 +143,7 @@ export default function SurveyDetailDrawer({ report, onClose, onConfirm }: Reado
 
           <div className="space-y-3">
             <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">Thông tin đo đạc</h4>
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
                 <span className="block font-medium text-slate-500">Diện tích</span>
                 <span className="mt-0.5 block font-bold text-slate-800">{report.area != null ? `${report.area} m²` : 'Chưa có'}</span>
@@ -161,27 +157,16 @@ export default function SurveyDetailDrawer({ report, onClose, onConfirm }: Reado
                 <span className="mt-0.5 block font-bold text-slate-800">{report.width != null ? `${report.width} m` : 'Chưa có'}</span>
               </div>
               <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
-                <span className="block font-medium text-slate-500">Lối vận chuyển đồ</span>
+                <span className="block font-medium text-slate-500">Thông tin lối vào</span>
                 <span className="mt-0.5 block font-bold text-slate-800">{report.entrance || 'Chưa có'}</span>
               </div>
-              <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
-                <span className="block font-medium text-slate-500">Chiều cao trần</span>
-                <span className="mt-0.5 block font-bold italic text-slate-500">{MOCK_CEILING_HEIGHT}</span>
-              </div>
-              <div className="rounded-lg border border-slate-100 bg-slate-50 p-2.5 text-xs">
-                <span className="block font-medium text-slate-500">Công suất nguồn điện</span>
-                <span className="mt-0.5 block font-bold italic text-slate-500">{MOCK_POWER_CAPACITY}</span>
-              </div>
             </div>
-            <p className="text-[10px] italic text-slate-400">
-              2 chỉ số "Chiều cao trần"/"Công suất nguồn điện" là dữ liệu fix cứng — backend chưa có cột lưu (xem docs/more-require.md mục (t)).
-            </p>
           </div>
 
           <div className="space-y-3">
             <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">Ghi nhận hiện trường</h4>
             <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 text-xs leading-relaxed text-slate-600">
-              <p className="mb-2 font-medium text-slate-800">Ràng buộc / hiện trạng mặt bằng:</p>
+              <p className="mb-2 font-medium text-slate-800">Các hạn chế tại địa điểm:</p>
               {report.siteConstraints || 'Chưa ghi nhận.'}
             </div>
             {report.notes && (
@@ -283,15 +268,6 @@ export default function SurveyDetailDrawer({ report, onClose, onConfirm }: Reado
             </div>
           </div>
 
-          {report.additionalRequests && (
-            <div className="space-y-3">
-              <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">Yêu cầu bổ sung</h4>
-              <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 text-xs leading-relaxed text-slate-600">
-                {report.additionalRequests}
-              </div>
-            </div>
-          )}
-
           <div className="space-y-3">
             <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">Minh chứng hình ảnh</h4>
             <div className="grid grid-cols-3 gap-2">
@@ -304,20 +280,10 @@ export default function SurveyDetailDrawer({ report, onClose, onConfirm }: Reado
                   className="h-24 w-full cursor-zoom-in rounded-lg border border-slate-100 object-cover transition-opacity hover:opacity-80"
                 />
               )}
-              {/* eslint-disable-next-line @next/next/no-img-element -- ảnh minh họa, không phải dữ liệu thật */}
-              <img
-                src={EXTRA_MOCK_IMAGE}
-                alt="Ảnh minh họa hiện trường (dữ liệu mẫu)"
-                onClick={() => setLightboxImage(EXTRA_MOCK_IMAGE)}
-                className="h-24 w-full cursor-zoom-in rounded-lg border border-dashed border-slate-200 object-cover opacity-70 transition-opacity hover:opacity-100"
-              />
             </div>
             {!evidence?.fileUrl && (
               <p className="text-[10px] italic text-slate-400">Chưa có ảnh minh chứng thật (evidence_id chưa gắn hoặc chưa tải được).</p>
             )}
-            <p className="text-[10px] italic text-slate-400">
-              Ảnh có viền nét đứt là ảnh minh họa (dữ liệu mẫu) — `survey_reports.evidence_id` chỉ lưu được 1 ảnh thật/báo cáo, xem docs/more-require.md mục (t).
-            </p>
           </div>
 
           <div className="flex flex-wrap justify-between gap-2 border-t border-slate-100 pt-4 text-xs text-slate-500">

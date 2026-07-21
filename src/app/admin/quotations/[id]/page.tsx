@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import type { AxiosError } from 'axios';
 import { Check, CheckCircle2, ChevronRight, Copy, FileSignature, Mail, MapPin, Pencil, Phone, Printer, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +17,12 @@ import { getAdminContracts } from '@/mocks/adminContractsMock';
 import CreateOrderFromQuotationModal from '@/components/quotations/CreateOrderFromQuotationModal';
 import { policyApiService } from '@/services/policy.service';
 import type { BusinessPolicy } from '@/types/policy';
+
+// unit là chuỗi tự do (types/policy.ts) — dữ liệu thật hiện seed "PERCENT" thay vì "%" cho policy tỉ lệ
+// phần trăm, chuẩn hóa lại cho dễ đọc thay vì hiển thị dính liền "50PERCENT".
+function formatPolicyUnit(unit: string): string {
+  return unit.trim().toUpperCase() === 'PERCENT' ? '%' : ` ${unit}`;
+}
 
 // Nối API thật theo docs/xemchitietbaogia_api.md — GET /quotations/:id thật đã trả sẵn ĐÚNG shape mở
 // rộng mà doc mục 5.1 đề xuất (customerEmail/customerAddress JOIN, createdBy object, linkedOrderId,
@@ -229,6 +236,10 @@ export default function AdminQuotationDetailPage() {
     setSaveError(null);
     try {
       await quotationApiService.updateQuotation(detail.quotationId, {
+        // Backend bắt buộc gửi kèm `version` ở mọi lần PUT (dù type cũ ghi "không dùng khi update") —
+        // thiếu field này sẽ luôn bị 400 VALIDATION_ERROR "expected string, received undefined". Gửi
+        // lại đúng version hiện tại của báo giá để không đổi version khi chỉ sửa hạng mục.
+        version: detail.version,
         notes: editNotes,
         items: editItems.map((it) => ({
           itemId: it.itemId,
@@ -239,8 +250,14 @@ export default function AdminQuotationDetailPage() {
       });
       setIsEditingItems(false);
       load();
-    } catch {
-      setSaveError('Lưu thay đổi thất bại. Vui lòng thử lại.');
+    } catch (err) {
+      // Backend chặn cứng PUT khi báo giá không còn ở trạng thái draft (400 "Chỉ có thể sửa báo giá khi
+      // còn ở trạng thái nháp (DRAFT)") — hiện nút "Sửa hạng mục" ở mọi trạng thái theo yêu cầu người
+      // dùng, nhưng phải hiện đúng lỗi thật từ backend thay vì thông báo chung chung, vì lưu sẽ luôn thất
+      // bại với báo giá đã duyệt/từ chối cho tới khi Backend nới lỏng ràng buộc này (xem
+      // docs/more-require.md mục (ae)).
+      const axiosError = err as AxiosError<{ message?: string; error?: { message?: string } }>;
+      setSaveError(axiosError.response?.data?.error?.message ?? axiosError.response?.data?.message ?? 'Lưu thay đổi thất bại. Vui lòng thử lại.');
     } finally {
       setIsSaving(false);
     }
@@ -428,18 +445,17 @@ export default function AdminQuotationDetailPage() {
                     <p className="text-xs italic leading-relaxed text-slate-700">{detail.notes || 'Không có yêu cầu ghi chú gì thêm cho báo giá này.'}</p>
                   )}
                 </div>
-                <div className="space-y-1 text-xs text-slate-500">
-                  <p className="font-semibold text-slate-700">Chính sách chung:</p>
-                  <p className="italic">
-                    • (Dữ liệu fix cứng — chưa có API chính sách thật) Báo giá có hiệu lực 30 ngày kể từ ngày lập.
-                  </p>
-                  {generalPolicies.map((policy) => (
-                    <p key={policy.policyId} className="italic">
-                      • {policy.policyName}: <strong className="font-semibold text-slate-700">{policy.policyValue.toLocaleString('vi-VN')}{policy.unit}</strong>
-                      {policy.description ? ` — ${policy.description}` : ''}
-                    </p>
-                  ))}
-                </div>
+                {generalPolicies.length > 0 && (
+                  <div className="space-y-1 text-xs text-slate-500">
+                    <p className="font-semibold text-slate-700">Chính sách chung:</p>
+                    {generalPolicies.map((policy) => (
+                      <p key={policy.policyId}>
+                        • {policy.policyName}: <strong className="font-semibold text-slate-700">{policy.policyValue.toLocaleString('vi-VN')}{formatPolicyUnit(policy.unit)}</strong>
+                        {policy.description ? ` — ${policy.description}` : ''}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -522,8 +538,14 @@ export default function AdminQuotationDetailPage() {
               <div className="mt-6">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-900">Hạng mục báo giá</p>
-                  {!isLinkedToContract && detail.status === 'draft' && (
-                    <button type="button" onClick={startEditingItems} aria-label="Sửa hạng mục" className="text-slate-400 hover:text-blue-600">
+                  {!isLinkedToContract && (
+                    <button
+                      type="button"
+                      onClick={startEditingItems}
+                      aria-label="Sửa hạng mục"
+                      title={detail.status !== 'draft' ? 'Báo giá đã duyệt/từ chối — backend chỉ cho lưu khi còn ở trạng thái nháp' : 'Sửa hạng mục'}
+                      className="text-slate-400 hover:text-blue-600"
+                    >
                       <Pencil className="h-4 w-4" />
                     </button>
                   )}

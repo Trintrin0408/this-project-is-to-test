@@ -115,7 +115,7 @@ const MANAGER_NAV_SECTIONS: NavSection[] = [
         icon: Calendar,
         children: [
           { label: 'Kế hoạch điều phối', href: '/manager/schedule/plans', icon: Calendar },
-          { label: 'Công việc (Work Task)', href: '/manager/schedule/tasks', icon: ClipboardList },
+          // { label: 'Công việc (Work Task)', href: '/manager/schedule/tasks', icon: ClipboardList },
         ],
       },
       {
@@ -138,17 +138,17 @@ const MANAGER_NAV_SECTIONS: NavSection[] = [
           { label: 'Trả thiết bị NCC', href: '/manager/suppliers/returns', icon: RotateCcw },
         ],
       },
-      {
-        label: 'Hiện trường',
-        href: '/manager/field-ops/handovers',
-        icon: HardHat,
-        children: [
-          { label: 'Nghiệm thu & bàn giao', href: '/manager/field-ops/handovers', icon: FileCheck2 },
-          { label: 'Vận chuyển & thi công', href: '/manager/field-ops/progress', icon: Activity },
-          { label: 'Change Request', href: '/manager/field-ops/change-requests', icon: AlertTriangle },
-        ],
-      },
-      { label: 'Công & lương', href: '/manager/wages', icon: Wallet },
+      // {
+      //   label: 'Hiện trường',
+      //   href: '/manager/field-ops/handovers',
+      //   icon: HardHat,
+      //   children: [
+      //     { label: 'Nghiệm thu & bàn giao', href: '/manager/field-ops/handovers', icon: FileCheck2 },
+      //     { label: 'Vận chuyển & thi công', href: '/manager/field-ops/progress', icon: Activity },
+      //     { label: 'Change Request', href: '/manager/field-ops/change-requests', icon: AlertTriangle },
+      //   ],
+      // },
+      // { label: 'Công & lương', href: '/manager/wages', icon: Wallet },
     ],
   },
 ];

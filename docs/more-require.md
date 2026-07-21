@@ -1202,3 +1202,193 @@ tồn đọng riêng, chưa xử lý ở lần sửa này.
   đầu implement — quan trọng hơn việc đối chiếu tên cột/enum chi tiết (doc gốc mục 0).
 - **Trạng thái**: không có thay đổi code. Xác nhận lại bằng `curl` với backend thật đang chạy
   (2026-07-21).
+
+## (ae) Bug thật: `PUT /api/v1/quotations/:id` (sửa hạng mục báo giá) luôn 400 nếu thiếu `version` — khác hẳn comment cũ "không dùng khi update"
+
+- **Màn liên quan**: `/manager/quotations/[id]`, `/admin/quotations/[id]` (nút "Lưu thay đổi" khi sửa
+  hạng mục báo giá nháp), và modal `CreateQuotationModal.tsx` (chế độ sửa báo giá gọi từ trang chi tiết
+  đơn, tab "Báo giá & hợp đồng").
+- **Nguyên nhân người dùng báo "báo giá không update được"**: `types/quotation.ts` khai
+  `SaveQuotationPayload.version?: string` kèm comment "bắt buộc khi tạo mới, không dùng khi update" —
+  sai. Test qua `curl` xác nhận `PUT /quotations/:id` **luôn** yêu cầu `version` có mặt, kể cả khi update:
+  thiếu field này trả `400 {"code":"VALIDATION_ERROR","details":[{"path":"version","message":"Invalid
+  input: expected string, received undefined"}]}`; gửi kèm đúng `version` hiện tại của báo giá thì `200`
+  thành công. Cả 3 nơi gọi `updateQuotation()` trong code (2 trang chi tiết báo giá + `CreateQuotationModal.tsx`)
+  đều **không gửi `version`** trong payload update — nghĩa là tính năng sửa hạng mục báo giá **luôn thất
+  bại 100%** với backend thật từ trước tới nay, chỉ hiện lỗi chung chung "Lưu thay đổi thất bại. Vui lòng
+  thử lại." (bị nuốt trong khối `catch` không đọc `error.response.data`), không có gì gợi ý nguyên nhân
+  thật.
+- **Đã sửa**: cả 3 nơi gọi `updateQuotation()` giờ gửi kèm `version: detail.version` (2 trang chi tiết)
+  / `version: editingQuotation.version` (`CreateQuotationModal.tsx`) — gửi lại đúng version hiện tại của
+  báo giá, không tự đổi version chỉ vì sửa hạng mục/số lượng/đơn giá. `SaveQuotationPayload.version` đổi
+  từ optional (`version?: string`) sang bắt buộc (`version: string`) để tsc tự bắt lỗi nếu có nơi khác
+  quên gửi field này sau này.
+- **Cần Backend xác nhận thêm** (chưa rõ, chỉ workaround được ở FE): route update có thực sự dùng giá
+  trị `version` gửi lên để làm gì (tăng version tự động? chỉ validate tồn tại?) hay chỉ là field bị yêu
+  cầu nhầm trong Zod schema (copy nhầm từ schema tạo mới, quên đổi thành optional cho route update) —
+  nếu là nhầm lẫn, Backend nên sửa validator cho phép bỏ trống `version` khi PUT, đúng nghĩa "chỉ đổi
+  field nào gửi lên" của 1 partial update thông thường.
+- **File đã sửa**: `src/types/quotation.ts` (`SaveQuotationPayload.version` bắt buộc + đính chính
+  comment), `src/app/{manager,admin}/quotations/[id]/page.tsx` (`handleSaveEditedItems`),
+  `src/components/orders/CreateQuotationModal.tsx` (`handleSubmit`, đổi tên biến `payload` →
+  `itemsAndNotes` để rõ nghĩa không còn thiếu field bắt buộc).
+- **Trạng thái**: `npx tsc --noEmit` sạch; `curl` tái hiện đúng bug (400 thiếu `version`) rồi xác nhận
+  fix hoạt động (200, cập nhật đúng SL/đơn giá) trên báo giá thật `QUO-004`, sau đó khôi phục lại đúng số
+  liệu gốc của báo giá này để không để lại dữ liệu test trong DB dùng chung. Smoke-test qua `curl` xác
+  nhận `/manager/quotations/[id]` và `/admin/quotations/[id]` trả HTTP 200, không lỗi compile. Chưa có
+  tool trình duyệt trong phiên này để tự bấm "Sửa hạng mục" → "Lưu thay đổi" và xem trực quan — cần người
+  dùng tự mở lại 1 báo giá `draft`, sửa SL/đơn giá 1 hạng mục, bấm lưu để xác nhận không còn báo lỗi.
+
+### (ae.1) Bổ sung 2026-07-21 (theo yêu cầu người dùng) — nút "Sửa hạng mục" giờ hiện ở MỌI trạng thái, không chỉ `draft`
+
+- **Phát hiện thêm khi test**: `PUT /quotations/:id` còn có **1 lớp chặn nghiệp vụ thứ 2**, độc lập với
+  bug `version` ở trên — kể cả gửi đủ `version`, backend vẫn từ chối `400
+  {"code":"BAD_REQUEST","message":"Chỉ có thể sửa báo giá khi còn ở trạng thái nháp (DRAFT)"}` nếu báo
+  giá đã `approved`/`rejected` (test trên báo giá thật `QUO-002`, đã `approved` + có `linkedOrderId`).
+- **Yêu cầu người dùng**: nút "Sửa hạng mục" phải hiện **bất kể trạng thái nào**, không chỉ `draft` như
+  trước. Đã chốt hướng xử lý qua `AskUserQuestion`: **vẫn hiện nút ở mọi trạng thái, cho vào chế độ sửa
+  bình thường, nhưng khi bấm "Lưu thay đổi" mà bị backend từ chối thì hiện đúng nguyên văn lỗi thật từ
+  backend** (không còn thông báo chung chung) — đồng thời ghi yêu cầu này vào đây để Backend cân nhắc nới
+  lỏng ràng buộc.
+- **Đã sửa**: bỏ điều kiện `detail.status === 'draft'` khỏi nút "Sửa hạng mục" ở cả 2 trang chi tiết báo
+  giá (giữ nguyên điều kiện `!isLinkedToContract` — không liên quan tới yêu cầu này), thêm `title` tooltip
+  báo trước khi trạng thái khác `draft`. `catch` của `handleSaveEditedItems` đổi từ thông báo cứng sang
+  đọc `error.response.data.error.message`/`.message` thật (cùng pattern `extractErrorMessage` đã dùng ở
+  `manager/customers/page.tsx`) — khi lưu thất bại vì lý do trạng thái, người dùng thấy đúng câu backend
+  trả về thay vì "Lưu thay đổi thất bại. Vui lòng thử lại." vô nghĩa.
+- **Cần Backend/Product quyết định**: có nên nới lỏng ràng buộc "chỉ sửa khi draft" hay không — đây là 1
+  quyết định nghiệp vụ (báo giá đã duyệt/gắn Order thật có nên cho sửa ngược lại số lượng/đơn giá hay
+  không, ảnh hưởng tới số liệu Order/Hợp đồng đã tạo dựa trên báo giá đó), **không phải bug kỹ thuật đơn
+  thuần** — FE chỉ có thể hiện đúng lỗi thật, không thể tự ý bỏ qua ràng buộc phía backend. Nếu Product
+  xác nhận cần cho sửa cả báo giá đã duyệt, Backend cần nới lỏng validator ở route `PUT
+  /quotations/:id` (có thể giữ nguyên chặn khi đã `linkedOrderId` — tránh sửa ngược khi đã phát sinh đơn
+  thật — nhưng cho phép sửa báo giá `approved` chưa gắn đơn nào).
+- **File đã sửa thêm**: `src/app/{manager,admin}/quotations/[id]/page.tsx` (nút "Sửa hạng mục" + catch
+  `handleSaveEditedItems`).
+- **Trạng thái**: `npx tsc --noEmit` sạch; `curl` xác nhận đúng lỗi `BAD_REQUEST` khi PUT báo giá
+  `approved` (`QUO-002`, không sửa dữ liệu, chỉ test-đọc hành vi lỗi). Chưa test trực quan qua trình
+  duyệt trong phiên này.
+
+### (ae.2) Re-test 2026-07-21 (theo yêu cầu người dùng "muốn sửa được báo giá kể cả đã liên kết đơn hàng") — Backend đã đổi thông báo lỗi, có vẻ đã thu hẹp phạm vi chặn về đúng `linkedOrderId`, nhưng CHƯA nới lỏng
+
+- **Người dùng yêu cầu**: cho sửa được hạng mục báo giá ngay cả khi báo giá đã liên kết Order thật, kèm
+  1 request `curl PUT /quotations/:id` mẫu (báo giá `QUO-011`, đã `approved` + có `linkedOrderId`).
+- **Test lại**: gửi đúng `curl` đó tới backend thật (dùng lại toàn bộ giá trị hiện tại, không đổi số liệu
+  để tránh để lại dữ liệu test) — vẫn bị từ chối, nhưng **thông báo lỗi đã đổi khác** so với lần test ở
+  mục (ae.1):
+  - Cũ (test trên `QUO-002`): `400 {"code":"BAD_REQUEST","message":"Chỉ có thể sửa báo giá khi còn ở
+    trạng thái nháp (DRAFT)"}`.
+  - Mới (test trên `QUO-011`, 2026-07-21): `400 {"code":"BAD_REQUEST","message":"Không thể sửa báo giá
+    đã được chuyển thành đơn hàng"}`.
+  - Thông báo mới gợi ý điều kiện chặn giờ bám theo `linkedOrderId` (đã "chuyển thành đơn hàng") thay vì
+    chặn mọi báo giá khác `draft` — **đúng hướng đề xuất** đã ghi ở cuối mục (ae.1) ("giữ nguyên chặn khi
+    đã `linkedOrderId` nhưng cho phép sửa báo giá `approved` chưa gắn đơn nào"). Tuy nhiên **chưa xác
+    minh được** vế còn lại (báo giá `approved` nhưng CHƯA có `linkedOrderId`) vì tại thời điểm test, toàn
+    bộ 8 báo giá `approved` hiện có trong DB đều đã có `linkedOrderId` — không còn báo giá nào ở trạng
+    thái "approved nhưng chưa gắn đơn" để thử.
+- **Kết luận**: đây vẫn là chặn nghiệp vụ chủ động phía backend, không phải bug — **FE không có cách nào
+  cho sửa thành công khi đã `linkedOrderId`** mà không giả kết quả (nút "Sửa hạng mục" + luồng lưu ở 2
+  trang chi tiết báo giá đã đúng như mô tả ở (ae.1): vẫn cho bấm sửa, khi lưu thất bại thì hiện đúng
+  nguyên văn lỗi thật ở trên). Giữ nguyên hiện trạng FE, không đổi gì thêm ở lần này.
+- **Cần Backend/Product xác nhận lại** (nối tiếp câu hỏi mở ở (ae.1)): có đúng là backend đã chủ đích thu
+  hẹp điều kiện chặn về riêng `linkedOrderId` hay không, và nếu người dùng thực sự cần sửa báo giá đã
+  liên kết Order — đây vẫn là quyết định nghiệp vụ (ảnh hưởng ngược số liệu Order đã tạo từ báo giá đó),
+  cần Backend nới lỏng có chủ đích (vd chỉ cho Manager sửa kèm cảnh báo đồng bộ lại Order, hoặc bắt buộc
+  hủy liên kết Order trước khi sửa) — FE sẽ nối theo ngay khi có endpoint/luồng chính thức.
+
+### (ae.3) Yêu cầu chính thức từ người dùng 2026-07-21 — CẦN Backend nới lỏng `PUT /quotations/:id` để cho sửa số lượng/đơn giá/giảm giá của báo giá đã có `linkedOrderId`
+
+- **Người dùng xác nhận rõ**: muốn Manager sửa được số liệu sản phẩm (số lượng/đơn giá/giảm giá từng
+  hạng mục) của báo giá **ngay cả khi đã liên kết Order** — không chấp nhận theo hướng vòng qua bằng cách
+  bắt Manager tự hủy liên kết Order rồi sửa rồi liên kết lại (đã đề xuất phương án này ở trên nhưng người
+  dùng chọn chờ Backend nới lỏng thay vì làm workaround đó ở FE).
+- **Lý do không tự làm workaround "hủy liên kết → sửa → liên kết lại" ở FE lúc này** (đã cân nhắc, không
+  chọn): 2 vướng mắc thật sẽ gây sai số liệu nếu làm ẩu — (1) nút "Hủy liên kết" hiện chỉ bật khi khách
+  hàng có **>1 báo giá đã duyệt** (`canUnlinkQuotation` ở `manager/orders/[id]/page.tsx`), phần lớn đơn
+  chỉ gắn đúng 1 báo giá nên sẽ bị khóa ngay bước đầu; (2) `handleLinkQuotation` hiện **cộng dồn** số
+  lượng từ báo giá vào `order.items` thay vì thay thế — nếu liên kết lại đúng báo giá vừa sửa sẽ bị cộng
+  dồn 2 lần, sai lệch tồn kho/hóa đơn của Order. Muốn làm workaround an toàn cần sửa cả 2 điểm này trước,
+  ngoài phạm vi yêu cầu hiện tại.
+- **Yêu cầu Backend**: nới lỏng validator ở route `PUT /api/v1/quotations/:id` — bỏ điều kiện chặn khi
+  báo giá đã có `linkedOrderId` (thông báo lỗi hiện tại: `"Không thể sửa báo giá đã được chuyển thành đơn
+  hàng"`, xem (ae.2)), cho phép Manager sửa `quantity`/`price`/`discount` của từng `quotation_items` bất
+  kể trạng thái liên kết Order. Nếu cần giữ 1 lớp bảo vệ nghiệp vụ, đề xuất: chỉ chặn khi Order đã ở giai
+  đoạn không còn hợp lý để đổi số liệu nữa (vd đã `settlement_pending`/`completed`/đã khóa kho), thay vì
+  chặn cứng ngay khi vừa có `linkedOrderId`.
+- **Lưu ý đồng bộ ngược khi Backend mở khóa**: nếu chỉ nới lỏng phía `quotations`, số liệu trên
+  `order.items` (tab "Thiết bị & Kho hàng" của Order) sẽ **không tự cập nhật theo** — hiện chỉ đồng bộ 1
+  lần lúc liên kết (`handleLinkQuotation`, cộng dồn). Khi backend cho sửa báo giá đã liên kết, FE sẽ cần
+  làm thêm 1 việc: sau khi sửa báo giá thành công, gọi lại để đồng bộ số liệu mới nhất vào `order.items`
+  của Order đang liên kết — chưa có endpoint/luồng nào cho việc đồng bộ lại này, cần Backend xác nhận
+  cách làm đúng (server tự đồng bộ, hay FE tự gọi `updateOrderItems` sau khi sửa báo giá).
+- **Trạng thái**: chưa có thay đổi code ở FE cho mục này — theo lựa chọn của người dùng, chờ Backend nới
+  lỏng trước khi triển khai UI cho phép sửa thật sự khi đã `linkedOrderId`.
+
+## (af) Màn "Thu hồi & hoàn kho" — ĐÃ nối API thật đầy đủ (list + detail + confirm), (ac) đã lỗi thời chỉ vài giờ sau khi viết; Backend đã âm thầm implement xong trong ngày 2026-07-21
+
+- **Màn liên quan**: `/manager/inventory/returns` (+ `[id]`), mirror `/admin/inventory/returns` (+
+  `[id]`) — xem [`docs/thuhoi_hoankho_api.md`](thuhoi_hoankho_api.md) (tài liệu đó vẫn đối chiếu
+  `D:\bnwems-backend-api`, SAI repo — xem cảnh báo đầu file này; chưa cập nhật lại, đọc mục này thay vì
+  tin nguyên văn tài liệu đó cho tới khi có người sửa lại).
+- **(ac) (viết sớm hơn cùng ngày 2026-07-21) đã lỗi thời**: `GET`/`POST /inventory/return-reports` lúc
+  đó test 404 thật, nhưng khi re-test lại (muộn hơn cùng ngày) cả 2 endpoint đã hoạt động — đối chiếu
+  timestamp file trong `D:\sep490-backend-api` (`prisma/`, `package.json`, `node_modules` đều sửa đổi
+  trong buổi sáng 2026-07-21) cho thấy Backend đã âm thầm code xong module `inventory` (bao gồm cả
+  `collected-equipment-reports`/alias `return-reports`) ngay trong ngày, sau thời điểm viết (ac).
+- **Xác nhận `D:\sep490-backend-api` (không phải `D:\bnwems-backend-api`) mới là backend đang chạy
+  thật** (cổng 3001, cùng DB Aiven `bnwems`) — đọc thẳng
+  `src/modules/inventory/{inventory.routes,inventory.service,inventory.repository,inventory.validators}.ts`
+  xác nhận:
+  1. **Có đủ 4 endpoint** dưới cả 2 tên `/inventory/collected-equipment-reports` và alias
+     `/inventory/return-reports` (cùng route/controller, không tách logic) — `GET` (danh sách, filter
+     `status`/`orderId`/`page`/`limit`, KHÔNG có `search` tự do), `GET /:reportId` (chi tiết, kèm JOIN
+     sẵn `itemName`/`unit`/`orderCode`/`reportedBy.fullName`/`confirmedBy.fullName`), `POST` (tạo — chỉ
+     role **LEADER** gọi được, 403 với Manager/Admin — đúng nguyên tắc CLAUDE.md "Leader Staff ghi nhận
+     qua mobile"), `PUT /:reportId/confirm` (chỉ role **MANAGER**, 403 với Admin — đúng "Admin không xử
+     lý vận hành hằng ngày"). Endpoint tạo thật cho Leader Staff là
+     `POST /api/v1/mobile/orders/:id/collected-reports` (module `mobile`, đã có sẵn, ngoài phạm vi web).
+  2. **Toàn bộ ID đều là string UUID** (`z.string().trim().min(1)` ở validator) — KHÔNG có bug
+     BigInt/UUID nào cả (giả thuyết bug này ở phiên trước dựa nhầm vào `D:\bnwems-backend-api`, 1 repo
+     backend cũ/khác, đã lỗi thời, không phải backend đang chạy — bài học: luôn xác nhận lại backend nào
+     đang thực sự chạy ở cổng 3001 trước khi kết luận bug, đừng tin theo path cũ đã ghi ở tài liệu trước
+     đó mà không kiểm tra lại).
+  3. **2 bảng `collected_equipment_reports`/`collected_equipment_report_items` VÀ bảng `inventory` đều
+     đã tồn tại thật** trong DB (khớp đúng schema đề xuất ở mục (c) — Backend làm đúng theo đề xuất, chỉ
+     thiếu cột `report_code` như (c) đề xuất, dùng thẳng `report_id` UUID làm mã hiển thị, FE tự cắt 8 ký
+     tự đầu để hiển thị gọn).
+- **Đã sửa FE** (nối API thật, bỏ hẳn mock):
+  - `src/types/collectedEquipmentReport.ts` — viết lại theo đúng `ReportDTO` thật (JOIN sẵn tên người,
+    tên thiết bị, mã đơn); giữ `CreateCollectedEquipmentReportPayload` cho `fieldOpsApiService` (mobile,
+    ngoài phạm vi web).
+  - `src/services/inventory.service.ts` — thêm `getReturnReports`/`getReturnReport`, bỏ
+    `createReturnReport` (web không gọi được, luôn 403).
+  - `src/app/{manager,admin}/inventory/returns/page.tsx` — đọc thật `GET .../return-reports` (phân
+    trang + filter `status` server-side, tìm kiếm tự do chỉ lọc trong trang hiện tại do backend không hỗ
+    trợ `search`), **bỏ hẳn nút/modal "Tạo phiếu"** (Manager/Admin không gọi được endpoint tạo).
+  - `src/app/{manager,admin}/inventory/returns/[id]/page.tsx` — đọc thật `GET .../return-reports/:id` +
+    `orderApiService.getOrder()` (lấy tên khách hàng/sự kiện) + `inventoryApiService.getInventory({itemId})`
+    cho từng dòng (số tồn kho "trước" live, để tính panel "Tổng hợp sau hoàn kho (dự kiến)" đúng công
+    thức thật `confirmReportAndApplyInventory` — available += good, damaged += damaged, total -= lost).
+    Bảng kiểm đếm đổi thành chỉ đọc (không còn input sửa tay — backend không có endpoint sửa item sau
+    khi tạo). Nút "Xác nhận hoàn kho" gọi thật `PUT .../confirm`, gate hiển thị qua
+    `usePermission('inventory:confirm-return')` (thêm permission key mới, map `['Manager']`) thay vì
+    hardcode role — trang Admin không còn nút này, hiện dòng chú thích thay thế.
+  - `src/constants/permissions.ts` — thêm `'inventory:confirm-return': ['Manager']`.
+  - Xóa hẳn `src/mocks/adminInventoryReturnsMock.ts` (không còn nơi nào dùng).
+- **Trạng thái**: `npx tsc --noEmit` sạch, `npm run build` sạch. **Đã test bằng trình duyệt thật**
+  (Playwright, đăng nhập thật 2 tài khoản seed `manager`/`admin`, mật khẩu `123456` —
+  `D:\sep490-backend-api\prisma\seed.ts`): danh sách hiển thị đúng 1 phiếu thật (`ORD-001`/Tech Corp,
+  Leader "Team Leader" tạo), vào chi tiết thấy đúng 2 thiết bị thật + panel tồn kho live đúng công thức,
+  bấm "Xác nhận hoàn kho" thành công thật (`confirmedBy: Project Manager`), số tồn kho 2 thiết bị cập
+  nhật đúng dự kiến (Loa JBL 1000W: available 8→10; Đèn Beam 230: available 12→13, damaged 1→2) — đối
+  chiếu lại qua `curl` sau khi xác nhận khớp 100% số đã hiển thị ở panel trước đó. Không có lỗi console.
+  Trang Admin xác nhận đúng không có nút xác nhận, chỉ xem.
+  ⚠️ **Lưu ý**: phiên test này đã xác nhận thật 1 phiếu hoàn kho có sẵn trong DB dùng chung
+  (`report_id = e6f5e369-ffe2-4c49-97df-a0446747e959`) — hành động không thể hoàn tác qua UI (không có
+  endpoint "hủy xác nhận"), nhưng đây rõ ràng là dữ liệu seed/demo (`ORD-001`, "Tech Corp", theo đúng
+  `prisma/seed.ts`), không phải dữ liệu khách hàng thật.
+- **Việc còn lại (không phải bug, chỉ là giới hạn đã biết của API hiện tại)**: không có `search` tự do
+  phía server cho danh sách (chỉ lọc được trong trang hiện tại); không có mã hiển thị ngắn cho phiếu
+  (dùng UUID cắt 8 ký tự); `reportType = 'SUPPLIER'` (trả thiết bị thuê ngoài) chưa lọc riêng khỏi danh
+  sách này (trang chỉ dùng cho `INTERNAL`, lọc client-side) — đủ dùng cho phạm vi màn `/manager/suppliers/returns`
+  khác xử lý riêng, không cần sửa thêm ở đây.

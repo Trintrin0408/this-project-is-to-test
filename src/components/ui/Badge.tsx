@@ -31,6 +31,7 @@ export const getStatusBadgeVariant = (status: string): BadgeVariant => {
   const mapping: Record<string, BadgeVariant> = {
     ACTIVE: 'success',
     CONFIRMED: 'success',
+    APPROVED: 'success',
     COMPLETED: 'success',
     SUCCESS: 'success',
     RECORDED: 'warning',

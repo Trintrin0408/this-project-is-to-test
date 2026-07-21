@@ -107,10 +107,22 @@ function ItemNameSearchInput({
 interface CreateQuotationWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (createdQuotationId?: string) => void;
+  /** Khi truyền vào: khóa cứng khách hàng, bỏ hẳn Bước 1 (dùng khi mở wizard này từ 1 khách hàng đã
+   * xác định sẵn, vd modal Tạo đơn hàng — không cần chọn lại khách). */
+  presetCustomer?: Customer;
+  /** Khi bật: sau khi lưu, tự PATCH status=approved luôn thay vì để lại bản nháp — dùng cho luồng Tạo
+   * đơn hàng, nơi Manager cần báo giá ở trạng thái duyệt được ngay để liên kết vào đơn mới tạo. */
+  autoApprove?: boolean;
 }
 
-export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }: Readonly<CreateQuotationWizardModalProps>) {
+export default function CreateQuotationWizardModal({
+  isOpen,
+  onClose,
+  onSaved,
+  presetCustomer,
+  autoApprove,
+}: Readonly<CreateQuotationWizardModalProps>) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
@@ -121,6 +133,9 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
   const [addCustomerError, setAddCustomerError] = useState<string | null>(null);
   const selectedCustomer = customers.find((c) => c.customerId === selectedCustomerId) ?? null;
+  // Preset khách hàng (mở từ modal Tạo đơn hàng) — Bước 1 vô nghĩa vì khách đã chốt sẵn, ẩn khỏi
+  // breadcrumb luôn thay vì chỉ nhảy qua, tránh gây hiểu lầm còn có bước chọn khách phía sau.
+  const visibleSteps = presetCustomer ? STEPS.filter((s) => s.step !== 1) : STEPS;
   const [items, setItems] = useState<DraftLineItem[]>([]);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
@@ -130,23 +145,38 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
   // Tải khách hàng + catalog thật (từ /inventory, xem giải thích ở đầu file) 1 lần khi mở modal —
   // SearchableSelect/ItemNameSearchInput chỉ lọc client-side trên mảng đã tải, không hỗ trợ tìm kiếm
   // bất đồng bộ (doc mục 4 gợi ý đổi component, chưa làm ở lần nối API này vì là component dùng chung).
+  // Khi có `presetCustomer` (mở từ modal Tạo đơn hàng): bỏ qua GET /customers, khóa cứng khách hàng đã
+  // chọn sẵn và nhảy thẳng vào Bước 2 — Bước 1 không còn ý nghĩa gì trong luồng này.
   useEffect(() => {
     if (!isOpen) return;
-    setIsLoadingCustomers(true);
-    // limit tối đa backend thật chấp nhận cho /customers là 100 (400 VALIDATION_ERROR nếu vượt quá,
-    // khác /inventory ở dưới không giới hạn 200 — xem docs/more-require.md).
-    customerApiService
-      .getCustomers({ limit: 100 })
-      .then((res) => setCustomers(res.data ?? []))
-      .catch(() => setCustomers([]))
-      .finally(() => setIsLoadingCustomers(false));
+    if (presetCustomer) {
+      setCustomers([presetCustomer]);
+      setSelectedCustomerId(presetCustomer.customerId);
+      setStep(2);
+    } else {
+      setStep(1);
+      setSelectedCustomerId('');
+      setIsLoadingCustomers(true);
+      // limit tối đa backend thật chấp nhận cho /customers là 100 (400 VALIDATION_ERROR nếu vượt quá,
+      // khác /inventory ở dưới không giới hạn 200 — xem docs/more-require.md).
+      customerApiService
+        .getCustomers({ limit: 100 })
+        .then((res) => setCustomers(res.data ?? []))
+        .catch(() => setCustomers([]))
+        .finally(() => setIsLoadingCustomers(false));
+    }
+    setItems([]);
+    setCatalogSearch('');
+    setOpenCategories(new Set());
+    setSaveError(null);
     setIsLoadingCatalog(true);
     inventoryApiService
       .getInventory({ limit: 200 })
       .then((res) => setCatalogItems(res.data ?? []))
       .catch(() => setCatalogItems([]))
       .finally(() => setIsLoadingCatalog(false));
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, presetCustomer?.customerId]);
 
   const catalogGroups = useMemo(() => {
     const term = catalogSearch.trim().toLowerCase();
@@ -226,7 +256,7 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
     setIsSaving(true);
     setSaveError(null);
     try {
-      await quotationApiService.createQuotation(selectedCustomer.customerId, {
+      const res = await quotationApiService.createQuotation(selectedCustomer.customerId, {
         version: 'v1',
         items: items.map((it) => ({
           itemId: it.itemId,
@@ -235,8 +265,14 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
           discount: (Number(it.discount) || 0) * (Number(it.quantity) || 1),
         })),
       });
+      const createdQuotationId: string | undefined = res.data?.quotationId;
+      if (autoApprove && createdQuotationId) {
+        // Không chặn thành công của bước tạo nếu riêng bước duyệt lỗi — báo giá vẫn được tạo (draft),
+        // chỉ là chưa tự duyệt được, Manager có thể vào trang báo giá duyệt tay sau.
+        await quotationApiService.updateQuotationStatus(createdQuotationId, { status: 'approved' }).catch(() => {});
+      }
       resetState();
-      onSaved();
+      onSaved(createdQuotationId);
     } catch {
       setSaveError('Lưu báo giá thất bại. Vui lòng kiểm tra lại hạng mục và thử lại.');
     } finally {
@@ -248,7 +284,7 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
     <Modal isOpen={isOpen} onClose={handleClose} title="Tạo báo giá mới" subtitle="Quy trình soạn thảo báo giá kinh doanh theo từng bước rõ ràng." size="2xl">
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4">
         <div className="flex w-max items-center gap-2">
-          {STEPS.map((s, index) => (
+          {visibleSteps.map((s, index) => (
             <div key={s.step} className="flex items-center gap-2">
               <div className="flex items-center gap-2">
                 <span
@@ -260,7 +296,7 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
                 </span>
                 <span className={`whitespace-nowrap text-sm font-medium ${step >= s.step ? 'text-slate-900' : 'text-slate-400'}`}>{s.label}</span>
               </div>
-              {index < STEPS.length - 1 && <ChevronRight className="h-4 w-4 flex-shrink-0 text-slate-300" />}
+              {index < visibleSteps.length - 1 && <ChevronRight className="h-4 w-4 flex-shrink-0 text-slate-300" />}
             </div>
           ))}
         </div>
@@ -489,10 +525,14 @@ export default function CreateQuotationWizardModal({ isOpen, onClose, onSaved }:
             </div>
 
             <div className="mt-6 flex justify-between border-t border-slate-100 pt-5">
-              <Button variant="secondary" onClick={() => setStep(1)}>
-                <ChevronLeft className="h-4 w-4" />
-                Quay lại
-              </Button>
+              {presetCustomer ? (
+                <span />
+              ) : (
+                <Button variant="secondary" onClick={() => setStep(1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                  Quay lại
+                </Button>
+              )}
               <Button disabled={items.length === 0} onClick={() => setStep(3)}>
                 Tiếp tục
                 <ChevronRight className="h-4 w-4" />

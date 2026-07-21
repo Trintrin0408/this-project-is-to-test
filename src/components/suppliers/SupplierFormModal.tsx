@@ -1,51 +1,84 @@
 'use client';
 
 import { useState } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import type { AdminSupplier, AdminSupplierFormValues } from '@/mocks/db/suppliers';
+import type { Supplier } from '@/types/supplier';
 
-const EMPTY_FORM: AdminSupplierFormValues = {
+export interface SupplierFormValues {
+  supplierCode: string;
+  supplierName: string;
+  serviceType: string;
+  contactPerson: string;
+  phone: string;
+  address: string;
+  rating: string;
+  notes: string;
+}
+
+const EMPTY_FORM: SupplierFormValues = {
   supplierCode: '',
   supplierName: '',
+  serviceType: '',
   contactPerson: '',
   phone: '',
   address: '',
-  serviceType: '',
+  rating: '',
+  notes: '',
 };
 
 interface SupplierFormModalProps {
   isOpen: boolean;
   mode: 'create' | 'edit';
-  supplier: AdminSupplier | null;
+  supplier: Supplier | null;
+  isSubmitting?: boolean;
+  /** Lỗi từ backend khi lưu thất bại — modal chỉ tự xử lý lỗi validate client-side (bắt buộc nhập). */
+  submitError?: string | null;
   onClose: () => void;
-  onSubmit: (values: AdminSupplierFormValues) => void;
+  onSubmit: (values: SupplierFormValues) => void;
 }
 
-/** Modal Thêm/Sửa đối tác — dùng chung cho /admin/suppliers và /manager/suppliers (trước đây khai
- * báo inline riêng trong mỗi page.tsx, gần như trùng lặp hoàn toàn — xem docs/supplier_api.md mục
- * 1.3/5/7). Bộ trường theo đúng payload đã xác nhận ở AddSupplierModal.tsx (có `contactPerson`,
- * không có `email`), chỉ khác là vẫn ghi qua mock CRUD (`createAdminSupplier`/`updateAdminSupplier`)
- * thay vì `supplierApiService` vì `GET/PUT /suppliers` chưa có route mock lẫn backend thật. */
-export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }: Readonly<SupplierFormModalProps>) {
-  const [values, setValues] = useState<AdminSupplierFormValues>(EMPTY_FORM);
-  const [error, setError] = useState('');
+interface SupplierFormErrors {
+  supplierCode?: string;
+  supplierName?: string;
+  serviceType?: string;
+}
+
+function validate(mode: 'create' | 'edit', values: SupplierFormValues): SupplierFormErrors {
+  const errors: SupplierFormErrors = {};
+  if (mode === 'create' && !values.supplierCode.trim()) errors.supplierCode = 'Vui lòng nhập mã đối tác';
+  if (!values.supplierName.trim()) errors.supplierName = 'Vui lòng nhập tên nhà cung cấp';
+  if (!values.serviceType.trim()) errors.serviceType = 'Vui lòng nhập phân loại dịch vụ';
+  return errors;
+}
+
+/** Modal Thêm/Sửa đối tác — dùng chung cho /admin/suppliers và /manager/suppliers. Bộ trường khớp
+ * đúng CreateSupplierPayload/UpdateSupplierPayload thật (types/supplier.ts) — có `contactPerson`,
+ * `rating`, `notes`; không có `email` (backend nhận thì bỏ qua âm thầm, không lưu — xem comment đầu
+ * types/supplier.ts). Việc gọi supplierApiService.createSupplier/updateSupplier do component cha
+ * (trang danh sách) thực hiện, modal chỉ thu thập + validate client-side rồi trả values ra ngoài. */
+export function SupplierFormModal({ isOpen, mode, supplier, isSubmitting, submitError, onClose, onSubmit }: Readonly<SupplierFormModalProps>) {
+  const [values, setValues] = useState<SupplierFormValues>(EMPTY_FORM);
+  const [errors, setErrors] = useState<SupplierFormErrors>({});
   const [wasOpen, setWasOpen] = useState(isOpen);
 
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen);
     if (isOpen) {
-      setError('');
+      setErrors({});
       setValues(
         mode === 'edit' && supplier
           ? {
               supplierCode: supplier.supplierCode,
               supplierName: supplier.supplierName,
-              contactPerson: supplier.contactPerson,
-              phone: supplier.phone,
-              address: supplier.address,
               serviceType: supplier.serviceType,
+              contactPerson: supplier.contactPerson ?? '',
+              phone: supplier.phone ?? '',
+              address: supplier.address ?? '',
+              rating: supplier.rating != null ? String(supplier.rating) : '',
+              notes: supplier.notes ?? '',
             }
           : EMPTY_FORM,
       );
@@ -53,10 +86,9 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
   }
 
   const handleSubmit = () => {
-    if (!values.supplierCode.trim() || !values.supplierName.trim() || !values.serviceType.trim()) {
-      setError('Vui lòng nhập đủ mã, tên và phân loại đối tác');
-      return;
-    }
+    const nextErrors = validate(mode, values);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
     onSubmit(values);
   };
 
@@ -65,16 +97,25 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
       isOpen={isOpen}
       onClose={onClose}
       title={mode === 'create' ? 'Thêm đối tác mới' : 'Chỉnh sửa đối tác'}
+      size="lg"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
             Hủy
           </Button>
-          <Button onClick={handleSubmit}>{mode === 'create' ? 'Thêm đối tác' : 'Lưu thay đổi'}</Button>
+          <Button onClick={handleSubmit} isLoading={isSubmitting}>
+            {mode === 'create' ? 'Thêm đối tác' : 'Lưu thay đổi'}
+          </Button>
         </>
       }
     >
       <div className="space-y-4">
+        {submitError && (
+          <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-600 ring-1 ring-inset ring-red-600/20">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            {submitError}
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Input
             label="Mã đối tác"
@@ -83,6 +124,7 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
             value={values.supplierCode}
             onChange={(e) => setValues((v) => ({ ...v, supplierCode: e.target.value }))}
             placeholder="VD: SUP_ABC"
+            error={errors.supplierCode}
           />
           <Input
             label="Tên nhà cung cấp"
@@ -90,6 +132,7 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
             value={values.supplierName}
             onChange={(e) => setValues((v) => ({ ...v, supplierName: e.target.value }))}
             placeholder="VD: Ánh Sáng Pro"
+            error={errors.supplierName}
           />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -102,16 +145,43 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
           <Input label="Số điện thoại" value={values.phone} onChange={(e) => setValues((v) => ({ ...v, phone: e.target.value }))} placeholder="09xx xxx xxx" />
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input label="Địa chỉ" value={values.address} onChange={(e) => setValues((v) => ({ ...v, address: e.target.value }))} placeholder="Quận/huyện, tỉnh/thành" />
+          <Input
+            label="Địa chỉ"
+            value={values.address}
+            onChange={(e) => setValues((v) => ({ ...v, address: e.target.value }))}
+            placeholder="Quận/huyện, tỉnh/thành"
+          />
           <Input
             label="Phân loại"
             required
             value={values.serviceType}
             onChange={(e) => setValues((v) => ({ ...v, serviceType: e.target.value }))}
             placeholder="VD: Âm thanh biểu diễn"
+            error={errors.serviceType}
           />
         </div>
-        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 ring-1 ring-inset ring-red-600/20">{error}</p>}
+        <Input
+          label="Đánh giá (0 - 5)"
+          type="number"
+          min={0}
+          max={5}
+          step={0.1}
+          value={values.rating}
+          onChange={(e) => setValues((v) => ({ ...v, rating: e.target.value }))}
+          placeholder="VD: 4.5"
+        />
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700" htmlFor="supplier-notes">
+            Ghi chú
+          </label>
+          <textarea
+            id="supplier-notes"
+            rows={3}
+            className="block w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={values.notes}
+            onChange={(e) => setValues((v) => ({ ...v, notes: e.target.value }))}
+          />
+        </div>
       </div>
     </Modal>
   );
