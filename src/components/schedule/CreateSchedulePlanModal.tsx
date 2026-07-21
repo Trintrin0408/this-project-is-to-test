@@ -79,6 +79,12 @@ export default function CreateSchedulePlanModal({ isOpen, onClose, orderId, defa
   const staffById = new Map(staff.map((u) => [u.userId, u]));
   const selectedUserIds = new Set(assignees.map((a) => a.userId).filter(Boolean));
 
+  // Backend trả VALIDATION_ERROR "endTime must be after startTime" — chặn sớm ngay khi nhập.
+  const timeError =
+    startTime && endTime && new Date(endTime) <= new Date(startTime)
+      ? 'Thời gian kết thúc phải sau thời gian bắt đầu.'
+      : undefined;
+
   const optionsForRow = (rowUserId: string) =>
     staff
       .filter((u) => u.userId === rowUserId || !selectedUserIds.has(u.userId))
@@ -93,6 +99,10 @@ export default function CreateSchedulePlanModal({ isOpen, onClose, orderId, defa
     const filledAssignees = assignees.filter((a) => a.userId);
     if (!taskId || !startTime) {
       setError('Vui lòng chọn loại việc và thời gian bắt đầu.');
+      return;
+    }
+    if (timeError) {
+      setError(timeError);
       return;
     }
     if (filledAssignees.length === 0) {
@@ -167,7 +177,14 @@ export default function CreateSchedulePlanModal({ isOpen, onClose, orderId, defa
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input type="datetime-local" label="Thời gian bắt đầu" required value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-          <Input type="datetime-local" label="Thời gian kết thúc (nếu có)" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+          <Input
+            type="datetime-local"
+            label="Thời gian kết thúc (nếu có)"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            min={startTime || undefined}
+            error={timeError}
+          />
         </div>
 
         <Input label="Địa điểm (mặc định theo địa điểm sự kiện)" value={location} onChange={(e) => setLocation(e.target.value)} />

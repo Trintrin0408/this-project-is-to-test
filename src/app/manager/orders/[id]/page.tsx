@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Activity, AlertOctagon, Ban, Box, Calendar, Check, CheckCircle2, ChevronLeft, Clock, Eye, FileText, Lock, Link2, MapPin, Package, Pencil, Phone, PlayCircle, Plus, Printer, Users } from 'lucide-react';
 import { Badge, getStatusBadgeVariant, type BadgeVariant } from '@/components/ui/Badge';
@@ -94,6 +94,13 @@ import type { SurveyReportListItem } from '@/types/survey';
 
 type DetailTab = 'overview' | 'lifecycle' | 'items' | 'plans' | 'quotation' | 'dispute';
 
+// Cho phép mở thẳng 1 tab qua URL (?tab=items...) — dùng bởi nút "Xuất thiết bị" ở trang chi tiết
+// báo giá (docs/xuatthietbi_tubaogia_api.md mục 5: điều hướng sang tab "Thiết bị & Kho hàng").
+function parseTabParam(value: string | null): DetailTab {
+  const valid: DetailTab[] = ['overview', 'lifecycle', 'items', 'plans', 'quotation', 'dispute'];
+  return valid.includes(value as DetailTab) ? (value as DetailTab) : 'overview';
+}
+
 // Tab "Tiến độ sự kiện" đã ẩn khỏi thanh điều hướng theo yêu cầu — giữ nguyên khai báo trong DetailTab
 // + nhánh render ở dưới (activeTab === 'lifecycle') để khôi phục lại dễ dàng nếu cần, chỉ bỏ khỏi TABS.
 const TABS: { id: DetailTab; label: string; icon: typeof Activity; doc?: string }[] = [
@@ -147,16 +154,33 @@ const ASSIGNEE_ROLE_LABEL: Record<string, string> = {
   TECHNICAL: 'Nhân viên kỹ thuật',
 };
 
-export default function ManagerOrderDetailPage() {
+function ManagerOrderDetailContent() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params.id;
 
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<DetailTab>('overview');
+  const [activeTab, setActiveTab] = useState<DetailTab>(() => parseTabParam(searchParams.get('tab')));
+
+  // Toast sau khi "Xuất thiết bị" từ trang chi tiết báo giá điều hướng sang đây
+  // (docs/xuatthietbi_tubaogia_api.md mục 5.3/5.4 bản v2: 'unchanged' = đơn đã khớp báo giá, no-op)
+  // — đọc từ ?exported= rồi xóa param khỏi URL ngay để không hiện lại khi refresh.
+  const [exportToast, setExportToast] = useState<'success' | 'unchanged' | null>(() => {
+    const value = searchParams.get('exported');
+    return value === 'success' || value === 'unchanged' ? value : null;
+  });
+
+  useEffect(() => {
+    if (!exportToast) return;
+    router.replace(`/manager/orders/${id}`, { scroll: false });
+    const timer = setTimeout(() => setExportToast(null), 5000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ chạy 1 lần cho toast đọc từ URL lúc mở trang
+  }, []);
 
   const [isCancelOpen, setIsCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -497,6 +521,19 @@ export default function ManagerOrderDetailPage() {
 
   return (
     <div className="p-6">
+      {exportToast && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2 }}
+          className={`fixed right-6 top-6 z-50 flex items-center gap-2.5 rounded-xl border px-4 py-3 text-sm font-medium shadow-lg ${
+            exportToast === 'success' ? 'border-green-200 bg-green-50 text-green-700' : 'border-blue-200 bg-blue-50 text-blue-700'
+          }`}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {exportToast === 'success' ? 'Xuất thiết bị thành công.' : 'Đơn đã khớp báo giá, không có gì cần xuất thêm.'}
+        </motion.div>
+      )}
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <button
@@ -1522,5 +1559,15 @@ export default function ManagerOrderDetailPage() {
         onCreated={load}
       />
     </div>
+  );
+}
+
+// useSearchParams bắt buộc bọc Suspense (node_modules/next/dist/docs/01-app/03-api-reference/
+// 04-functions/use-search-params.md) — cùng pattern với manager/field-ops/change-requests.
+export default function ManagerOrderDetailPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-400">Đang tải thông tin đơn đặt...</div>}>
+      <ManagerOrderDetailContent />
+    </Suspense>
   );
 }
