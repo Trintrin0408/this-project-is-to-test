@@ -1,115 +1,173 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Eye, Plus, Search, Trash2 } from 'lucide-react';
-import { Badge } from '@/components/ui/Badge';
+import { Ban, Eye, Search } from 'lucide-react';
+import { Badge, type BadgeVariant, getStatusBadgeVariant } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
 import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
-import BookingFormModal from '@/components/bookings/BookingFormModal';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
-import {
-  AdminOrderRow,
-  BOOKING_STATUS_META,
-  BookingStatus,
-  COORDINATOR_POOL,
-  PAYMENT_STATUS_META,
-  PaymentStatus,
-  addAdminOrder,
-  buildOrderItems,
-  deleteAdminOrder,
-  getAdminOrders,
-  nextAdminOrderId,
-} from '@/mocks/db/orders';
+import { orderApiService } from '@/services/order.service';
+import { customerApiService } from '@/services/customer.service';
+import { ORDER_PAYMENT_STATUS_LABEL, ORDER_STATUS_LABEL } from '@/constants/order-status';
+import type { Order, OrderListMeta, OrderPaymentStatus, OrderStatus } from '@/types/order';
+import type { Customer } from '@/types/customer';
+import CreateOrderModal from '@/components/orders/CreateOrderModal';
 
-// Trang thuần giao diện — mirror 1:1 từ src/app/admin/orders_audit/page.tsx cho vai trò Manager, chỉ
-// đổi tiền tố đường dẫn /admin/orders_audit -> /manager/orders. Toàn bộ mock data/CRUD dùng chung với
-// Admin qua @/mocks/adminOrdersMock — xem giải thích ở đầu file mock đó.
+// Nối API thật theo docs/danhsachdondat_api.md — GET /orders đã trả sẵn customerName/customerPhone
+// (JOIN) + meta.counts (dùng thẳng cho 6 thẻ KPI, không cần endpoint /orders/stats riêng như doc từng
+// đề xuất). Các field mock không có cột thật trên `orders` (packageType/coordinatorName/depositAmount/
+// weddingEndDate — xem doc mục 4/4.1/5.1) đã BỎ khỏi màn này thay vì hiển thị dữ liệu bịa; "Sự kiện /
+// Khách hàng" đổi sang dùng eventName/eventType thật. Nút "Xóa đơn đặt" đổi thành "Hủy đơn"
+// (PUT /orders/:id/status, không có DELETE thật).
+//
+// Cập nhật 2026-07-20 — mở lại nút "Khởi tạo đơn đặt hàng" (theo docs/taodondatlichtiecmoi_api.md
+// mục 3, Hướng A): backend thật đã có sẵn `GET /api/v1/catalog/items` trả kèm `rentalPrice` thật (test
+// curl xác nhận — khác giả định "404 toàn bộ module catalog" ghi trong docs/more-require.md mục (p.2)/
+// (n), có thể backend đã mount thêm module này sau khi các doc đó được viết), nên `CreateOrderModal`
+// (đã viết sẵn từ trước, mồ côi — không trang nào import) dùng đúng `catalogApiService.getItems()` +
+// `orderApiService.createOrder()` hoạt động được ngay, không cần fix cứng giá. Đã wire modal này vào
+// nút thay cho trạng thái khóa cũ.
+
+const PAYMENT_BADGE_VARIANT: Record<OrderPaymentStatus, BadgeVariant> = {
+  UNPAID: 'neutral',
+  DEPOSITED: 'warning',
+  PAID: 'success',
+};
+
+const CANCELLABLE_STATUSES: OrderStatus[] = ['NEW', 'CONFIRMED', 'IN_PROGRESS'];
+
+const emptyMeta: OrderListMeta = {
+  page: 1,
+  limit: 10,
+  totalItems: 0,
+  totalPages: 1,
+  counts: { all: 0, new: 0, confirmed: 0, inProgress: 0, completed: 0, cancelled: 0 },
+};
 
 export default function ManagerOrdersPage() {
-  const [orders, setOrders] = useState<AdminOrderRow[]>(() => getAdminOrders());
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [meta, setMeta] = useState<OrderListMeta>(emptyMeta);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusFilter, setStatusFilter] = useState<BookingStatus | 'ALL'>('ALL');
-  const [payFilter, setPayFilter] = useState<PaymentStatus | 'ALL'>('ALL');
-  const [coordinatorFilter, setCoordinatorFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'ALL'>('ALL');
+  const [payFilter, setPayFilter] = useState<OrderPaymentStatus | 'ALL'>('ALL');
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [deletingOrder, setDeletingOrder] = useState<AdminOrderRow | null>(null);
+  const [cancelingOrder, setCancelingOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
-  const kpis = {
-    total: orders.length,
-    NEW: orders.filter((o) => o.status === 'NEW').length,
-    CONFIRMED: orders.filter((o) => o.status === 'CONFIRMED').length,
-    IN_PROGRESS: orders.filter((o) => o.status === 'IN_PROGRESS').length,
-    COMPLETED: orders.filter((o) => o.status === 'COMPLETED').length,
-    CANCELLED: orders.filter((o) => o.status === 'CANCELLED').length,
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    // limit tối đa backend thật chấp nhận cho /customers là 100 (400 VALIDATION_ERROR nếu vượt quá).
+    customerApiService
+      .getCustomers({ limit: 100 })
+      .then((res) => setCustomers(res.data ?? []))
+      .catch(() => setCustomers([]));
+  }, []);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, payFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setLoadError(null);
+    orderApiService
+      .getOrders({
+        page,
+        limit,
+        search: search.trim() || undefined,
+        orderStatus: statusFilter !== 'ALL' ? statusFilter : undefined,
+        paymentStatus: payFilter !== 'ALL' ? payFilter : undefined,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setOrders(res.data ?? []);
+        setMeta(res.meta ?? emptyMeta);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOrders([]);
+        setLoadError('Không tải được danh sách đơn đặt hàng. Vui lòng thử lại.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, search, statusFilter, payFilter, reloadToken]);
+
+  const handleOrderCreated = () => {
+    setIsCreateOpen(false);
+    setPage(1);
+    setReloadToken((t) => t + 1);
   };
-
-  const filteredOrders = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return orders.filter((o) => {
-      if (statusFilter !== 'ALL' && o.status !== statusFilter) return false;
-      if (payFilter !== 'ALL' && o.paymentStatus !== payFilter) return false;
-      if (coordinatorFilter !== 'ALL' && o.coordinatorName !== coordinatorFilter) return false;
-      if (!term) return true;
-      return (
-        o.orderId.toLowerCase().includes(term) ||
-        o.customerName.toLowerCase().includes(term) ||
-        o.customerPhone.includes(term) ||
-        o.venue.toLowerCase().includes(term)
-      );
-    });
-  }, [orders, search, statusFilter, payFilter, coordinatorFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / limit));
-  const safePage = Math.min(page, totalPages);
-  const pageRows = filteredOrders.slice((safePage - 1) * limit, safePage * limit);
-  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredOrders.length, limit };
 
   const handleResetFilters = () => {
     setSearchInput('');
     setStatusFilter('ALL');
     setPayFilter('ALL');
-    setCoordinatorFilter('ALL');
   };
 
-  const handleCreate = (values: Omit<AdminOrderRow, 'orderId' | 'checklist' | 'status' | 'items' | 'liveChecklist' | 'disputeLogs'>) => {
-    const orderId = nextAdminOrderId();
-    addAdminOrder({
-      orderId,
-      status: 'NEW',
-      checklist: [],
-      items: buildOrderItems(orderId, values.totalPrice, values.venue, 'NEW'),
-      liveChecklist: {},
-      disputeLogs: [],
-      ...values,
-    });
-    setOrders(getAdminOrders());
-    setIsFormOpen(false);
+  const handleCancelConfirm = async () => {
+    if (!cancelingOrder) return;
+    setIsCancelling(true);
+    setCancelError(null);
+    try {
+      await orderApiService.updateOrderStatus(cancelingOrder.orderId, {
+        orderStatus: 'CANCELLED',
+        cancelReason: cancelReason.trim() || undefined,
+      });
+      setCancelingOrder(null);
+      setCancelReason('');
+      setPage(1);
+      const res = await orderApiService.getOrders({
+        page: 1,
+        limit,
+        search: search.trim() || undefined,
+        orderStatus: statusFilter !== 'ALL' ? statusFilter : undefined,
+        paymentStatus: payFilter !== 'ALL' ? payFilter : undefined,
+      });
+      setOrders(res.data ?? []);
+      setMeta(res.meta ?? emptyMeta);
+    } catch {
+      setCancelError('Hủy đơn thất bại. Vui lòng thử lại.');
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
-  const handleDeleteConfirm = () => {
-    if (!deletingOrder) return;
-    deleteAdminOrder(deletingOrder.orderId);
-    setOrders((prev) => prev.filter((o) => o.orderId !== deletingOrder.orderId));
-    setDeletingOrder(null);
+  const paginationState: PaginationState = {
+    currentPage: meta.page,
+    totalPages: Math.max(1, meta.totalPages),
+    totalItems: meta.totalItems,
+    limit: meta.limit,
   };
 
   const kpiCards: { label: string; value: number; className: string }[] = [
-    { label: 'Tổng đơn', value: kpis.total, className: 'bg-white text-slate-900' },
-    { label: 'Mới', value: kpis.NEW, className: 'bg-slate-50 text-slate-600' },
-    { label: 'Đã xác nhận', value: kpis.CONFIRMED, className: 'bg-blue-50/50 text-blue-700' },
-    { label: 'Đang chuẩn bị', value: kpis.IN_PROGRESS, className: 'bg-indigo-50/50 text-indigo-700' },
-    { label: 'Hoàn thành', value: kpis.COMPLETED, className: 'bg-green-50/50 text-green-700' },
-    { label: 'Đã hủy', value: kpis.CANCELLED, className: 'bg-red-50/50 text-red-700' },
+    { label: 'Tổng đơn', value: meta.counts.all, className: 'bg-white text-slate-900' },
+    { label: 'Mới', value: meta.counts.new, className: 'bg-slate-50 text-slate-600' },
+    { label: 'Đã xác nhận', value: meta.counts.confirmed, className: 'bg-blue-50/50 text-blue-700' },
+    { label: 'Đang thực hiện', value: meta.counts.inProgress, className: 'bg-indigo-50/50 text-indigo-700' },
+    { label: 'Hoàn thành', value: meta.counts.completed, className: 'bg-green-50/50 text-green-700' },
+    { label: 'Đã hủy', value: meta.counts.cancelled, className: 'bg-red-50/50 text-red-700' },
   ];
 
   return (
@@ -119,10 +177,7 @@ export default function ManagerOrdersPage() {
           <h1 className="text-2xl font-bold text-slate-900">Quản lý đơn đặt hàng</h1>
           <p className="mt-1 text-sm text-slate-500">Giám sát trạng thái đơn hàng sự kiện, kiểm soát thanh toán và điều phối kho.</p>
         </div>
-        <Button onClick={() => setIsFormOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Khởi tạo đơn đặt hàng
-        </Button>
+        <Button onClick={() => setIsCreateOpen(true)}>Khởi tạo đơn đặt hàng</Button>
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-6">
@@ -161,37 +216,25 @@ export default function ManagerOrdersPage() {
           </div>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as BookingStatus | 'ALL')}
+            onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'ALL')}
             className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
           >
             <option value="ALL">Tất cả trạng thái</option>
-            {(Object.keys(BOOKING_STATUS_META) as BookingStatus[]).map((s) => (
+            {(Object.keys(ORDER_STATUS_LABEL) as OrderStatus[]).map((s) => (
               <option key={s} value={s}>
-                {BOOKING_STATUS_META[s].label}
+                {ORDER_STATUS_LABEL[s]}
               </option>
             ))}
           </select>
           <select
             value={payFilter}
-            onChange={(e) => setPayFilter(e.target.value as PaymentStatus | 'ALL')}
+            onChange={(e) => setPayFilter(e.target.value as OrderPaymentStatus | 'ALL')}
             className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
           >
             <option value="ALL">Tất cả thanh toán</option>
-            {(Object.keys(PAYMENT_STATUS_META) as PaymentStatus[]).map((p) => (
+            {(Object.keys(ORDER_PAYMENT_STATUS_LABEL) as OrderPaymentStatus[]).map((p) => (
               <option key={p} value={p}>
-                {PAYMENT_STATUS_META[p].label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={coordinatorFilter}
-            onChange={(e) => setCoordinatorFilter(e.target.value)}
-            className="max-w-[160px] rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700 focus:border-blue-500 focus:outline-none"
-          >
-            <option value="ALL">Mọi điều phối viên</option>
-            {COORDINATOR_POOL.map((c) => (
-              <option key={c} value={c}>
-                {c}
+                {ORDER_PAYMENT_STATUS_LABEL[p]}
               </option>
             ))}
           </select>
@@ -229,33 +272,45 @@ export default function ManagerOrdersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {pageRows.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={9} className="py-10 text-center text-slate-400">
+                    Đang tải danh sách đơn đặt hàng...
+                  </td>
+                </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={9} className="py-10 text-center text-red-500">
+                    {loadError}
+                  </td>
+                </tr>
+              ) : orders.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-10 text-center italic text-slate-400">
                     Chưa có đơn đặt hàng nào khớp với tìm kiếm.
                   </td>
                 </tr>
               ) : (
-                pageRows.map((o) => (
+                orders.map((o) => (
                   <tr key={o.orderId} className="text-xs transition-all hover:bg-slate-50/50">
                     <td className="px-5 py-3 font-mono font-bold text-blue-600">
                       <Link href={`/manager/orders/${o.orderId}`} className="hover:underline">
-                        {o.orderId}
+                        {o.orderCode}
                       </Link>
                     </td>
                     <td className="px-5 py-3">
-                      <p className="max-w-[200px] truncate font-semibold text-slate-950">{o.packageType}</p>
+                      <p className="max-w-[200px] truncate font-semibold text-slate-950">{o.eventName || o.eventType}</p>
                       <p className="mt-0.5 text-[10px] font-medium text-slate-400">{o.customerName}</p>
                     </td>
-                    <td className="px-5 py-3 font-medium text-slate-700">{formatDate(o.weddingDate)}</td>
-                    <td className="max-w-[150px] truncate px-5 py-3 text-slate-600">{o.venue}</td>
-                    <td className="px-5 py-3 text-center font-bold text-slate-700">{o.guestCount}</td>
-                    <td className="px-5 py-3 text-right font-black text-slate-900">{formatCurrency(o.totalPrice)}</td>
+                    <td className="px-5 py-3 font-medium text-slate-700">{formatDate(o.eventDate)}</td>
+                    <td className="max-w-[150px] truncate px-5 py-3 text-slate-600">{o.location}</td>
+                    <td className="px-5 py-3 text-center font-bold text-slate-700">{o.guestCount ?? '—'}</td>
+                    <td className="px-5 py-3 text-right font-black text-slate-900">{formatCurrency(o.totalAmount)}</td>
                     <td className="px-5 py-3 text-center">
-                      <Badge variant={PAYMENT_STATUS_META[o.paymentStatus].variant}>{PAYMENT_STATUS_META[o.paymentStatus].label}</Badge>
+                      <Badge variant={PAYMENT_BADGE_VARIANT[o.paymentStatus]}>{ORDER_PAYMENT_STATUS_LABEL[o.paymentStatus]}</Badge>
                     </td>
                     <td className="px-5 py-3 text-center">
-                      <Badge variant={BOOKING_STATUS_META[o.status].variant}>{BOOKING_STATUS_META[o.status].label}</Badge>
+                      <Badge variant={getStatusBadgeVariant(o.orderStatus)}>{ORDER_STATUS_LABEL[o.orderStatus]}</Badge>
                     </td>
                     <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -267,15 +322,21 @@ export default function ManagerOrdersPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingOrder(o)}
-                          aria-label="Xóa đơn đặt"
-                          title="Xóa đơn đặt"
-                          className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {CANCELLABLE_STATUSES.includes(o.orderStatus) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCancelingOrder(o);
+                              setCancelReason('');
+                              setCancelError(null);
+                            }}
+                            aria-label="Hủy đơn"
+                            title="Hủy đơn"
+                            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          >
+                            <Ban className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -288,26 +349,43 @@ export default function ManagerOrdersPage() {
         <Pagination pagination={paginationState} onPageChange={setPage} />
       </motion.div>
 
-      <BookingFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} coordinatorOptions={COORDINATOR_POOL} onSubmit={handleCreate} />
-
       <Modal
-        isOpen={Boolean(deletingOrder)}
-        onClose={() => setDeletingOrder(null)}
-        title="Xóa đơn đặt"
-        subtitle={deletingOrder ? `Bạn có chắc muốn xóa đơn "${deletingOrder.orderId}"? Hành động này không thể hoàn tác.` : undefined}
+        isOpen={Boolean(cancelingOrder)}
+        onClose={() => setCancelingOrder(null)}
+        title="Hủy đơn đặt"
+        subtitle={cancelingOrder ? `Bạn có chắc muốn hủy đơn "${cancelingOrder.orderCode}"? Hành động này không thể hoàn tác.` : undefined}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeletingOrder(null)}>
-              Hủy
+            <Button variant="secondary" onClick={() => setCancelingOrder(null)} disabled={isCancelling}>
+              Đóng
             </Button>
-            <Button variant="danger" onClick={handleDeleteConfirm}>
-              Xóa đơn đặt
+            <Button variant="danger" onClick={handleCancelConfirm} disabled={isCancelling}>
+              {isCancelling ? 'Đang hủy...' : 'Xác nhận hủy đơn'}
             </Button>
           </>
         }
       >
-        <div />
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-700" htmlFor="cancel-reason">
+            Lý do hủy (không bắt buộc)
+          </label>
+          <textarea
+            id="cancel-reason"
+            rows={3}
+            className="block w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+          />
+          {cancelError && <p className="mt-1 text-xs text-red-500">{cancelError}</p>}
+        </div>
       </Modal>
+
+      <CreateOrderModal
+        isOpen={isCreateOpen}
+        customers={customers}
+        onClose={() => setIsCreateOpen(false)}
+        onCreated={handleOrderCreated}
+      />
     </div>
   );
 }

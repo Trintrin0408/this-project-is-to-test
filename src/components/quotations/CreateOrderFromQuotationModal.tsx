@@ -1,450 +1,357 @@
 'use client';
 
-import { useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import type { AxiosError } from 'axios';
+import { Check, Package, Plus, Trash2, User } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { AdminQuotationRow, ITEM_CATEGORY_OPTIONS } from '@/mocks/db/quotations';
-import { AdminOrderLineItem, COORDINATOR_POOL, PACKAGE_OPTIONS, VENUE_OPTIONS, addAdminOrder, nextAdminOrderId } from '@/mocks/db/orders';
+import { orderApiService } from '@/services/order.service';
+import { catalogApiService } from '@/services/catalog.service';
+import { EVENT_TYPES } from '@/constants/order-event-type';
+import type { QuotationDetailApi } from '@/types/quotation';
+import type { Item } from '@/types/catalog';
 
-// Popup "Sinh hợp đồng & đơn đặt" — port từ trang thuần giao diện cũ
-// src/app/admin/quotations/[id]/create-order/page.tsx sang dạng modal theo yêu cầu người dùng. Nút
-// mở popup này chỉ hiện khi báo giá ĐÃ DUYỆT và chưa có đơn đặt liên kết (xem điều kiện ở
-// admin/quotations/[id]/page.tsx) nên bỏ các nhánh guard (không tìm thấy báo giá / chưa duyệt / đã có
-// đơn đặt) của trang gốc — điều kiện tiên quyết đã được đảm bảo trước khi mở modal. Rút gọn Bước 1-2
-// thành xem lại (không phải bộ chọn) vì đã biết sẵn khách hàng/báo giá.
-//
-// Bước 5 GỌI addAdminOrder() thật (Task 15, DEMO_CHECKLIST.md) — trước đây chỉ đóng popup, không tạo
-// Order thật (xem lịch sử task). Gọi addAdminOrder() trực tiếp từ db/orders.ts (không qua
-// orderApiService/mockAdapter.ts) để nhất quán với cách admin/orders_audit/page.tsx tự tạo đơn — luồng
-// service-layer (orderApiService.createOrder -> mockAdapter POST /orders) hiện chỉ hỗ trợ item dạng
-// itemId tra cứu catalog thật, không khớp với hạng mục nhập tay/lấy từ báo giá ở đây. quotationId được
-// gán thật vào đơn mới để `linkedOrder` ở admin/quotations/[id] và manager/quotations/[id] (đối chiếu
-// qua getAdminOrders().find(o => o.quotationId === ...)) nhận diện đúng ngay sau khi lưu.
+// Viết lại 2026-07-21 để nối API thật — bản cũ nhận prop `AdminQuotationRow` (shape mock) và gọi thẳng
+// `addAdminOrder()` mock, không tương thích `QuotationDetailApi` thật đã nối ở trang chi tiết báo giá
+// (xem docs/more-require.md mục (q)/(s)). Bản mới dùng đúng `CreateOrderPayload` thật
+// (customerId/eventType/eventDate ISO/location/guestCount/items[]) — cùng shape đã xác nhận hoạt động ở
+// `CreateOrderModal.tsx` — chỉ khác là khách hàng + hạng mục được PREFILL sẵn từ báo giá đã duyệt, và
+// gửi kèm `quotationId` để backend tự liên kết Order ↔ Quotation ngay lúc tạo (không cần gọi thêm
+// `PATCH /orders/:id/quotation` sau đó). Đã bỏ toàn bộ field không có cột thật trên `orders`
+// (weddingEndDate/depositAmount/paymentStatus/coordinatorName/packageType/venue — xem more-require.md
+// mục (s) "Field đã bỏ khỏi form so với mock cũ").
 
-const STEPS = [
-  { step: 1, label: 'Khách hàng' },
-  { step: 2, label: 'Báo giá liên quan' },
-  { step: 3, label: 'Thông tin sự kiện' },
-  { step: 4, label: 'Hạng mục thiết bị' },
-  { step: 5, label: 'Lưu hoàn tất' },
-];
-
-function emptyItem(): AdminOrderLineItem {
-  return {
-    id: `oi-new-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    category: ITEM_CATEGORY_OPTIONS[3],
-    description: '',
-    quantity: 1,
-    unitPrice: 0,
-    status: 'pending',
-    source: 'internal',
-    preparedQty: 0,
-    preparedBy: '',
-  };
+interface OrderItemDraft {
+  key: string;
+  itemId: string;
+  quantity: number;
+  unitPrice: number;
 }
+
+let draftKeySeq = 0;
+function nextDraftKey(): string {
+  draftKeySeq += 1;
+  return `qo-item-${draftKeySeq}`;
+}
+
+const EVENT_TYPE_OPTIONS = EVENT_TYPES.map((t) => ({ value: t, label: t }));
 
 interface CreateOrderFromQuotationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  quotation: AdminQuotationRow;
-  onSaved: () => void;
+  quotation: QuotationDetailApi;
+  onCreated: (orderId: string) => void;
 }
 
-export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotation, onSaved }: Readonly<CreateOrderFromQuotationModalProps>) {
-  // Bỏ qua bước chọn khách hàng/báo giá (đã biết sẵn) — vào thẳng Bước 3 như hành vi "prefilled" của
-  // bản mẫu gốc, nhưng vẫn giữ đủ 5 bước để xem lại/điều hướng qua lại.
-  const [currentStep, setCurrentStep] = useState(3);
-  const [eventName, setEventName] = useState(`Sự kiện chốt từ báo giá ${quotation.code}`);
+export default function CreateOrderFromQuotationModal({ isOpen, onClose, quotation, onCreated }: Readonly<CreateOrderFromQuotationModalProps>) {
+  const [eventName, setEventName] = useState('');
+  const [eventType, setEventType] = useState('');
   const [eventDate, setEventDate] = useState('');
-  const [venue, setVenue] = useState(VENUE_OPTIONS[0]);
-  const [packageType, setPackageType] = useState(PACKAGE_OPTIONS[0]);
-  const [coordinatorName, setCoordinatorName] = useState(quotation.assignee ?? COORDINATOR_POOL[0]);
-  const [guestCount, setGuestCount] = useState(quotation.guestCount ?? 100);
-  const [notes, setNotes] = useState(quotation.notes ?? '');
-  // Mốc 2 "Xác nhận cọc & khảo sát hiện trường" ở trang chi tiết đơn (Tiến độ sự kiện) đọc trực tiếp
-  // paymentStatus/surveyAssignment của đơn — cho đánh dấu sẵn 2 việc này ngay lúc tạo đơn để những đơn
-  // khách đã đặt cọc/đã khảo sát từ trước không phải xác nhận thủ công lại lần nữa sau khi tạo.
-  const [alreadyDeposited, setAlreadyDeposited] = useState(false);
-  const [items, setItems] = useState<AdminOrderLineItem[]>(() =>
-    quotation.items.map((qi, idx) => ({
-      id: `oi-from-${quotation.quotationId}-${idx}`,
-      category: qi.category,
-      description: qi.name,
-      quantity: qi.quantity,
-      unitPrice: Math.max(0, qi.unitPrice - (qi.discount ?? 0)),
-      status: 'pending' as const,
-      source: 'internal' as const,
-      preparedQty: 0,
-      preparedBy: '',
-    })),
+  const [location, setLocation] = useState('');
+  const [guestCount, setGuestCount] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [itemList, setItemList] = useState<Item[]>([]);
+  const [items, setItems] = useState<OrderItemDraft[]>([]);
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Prefill lại từ báo giá mỗi khi mở modal — khách hàng + hạng mục lấy sẵn từ quotation.items, GỘP
+  // theo itemId (cộng tổng số lượng) trước khi đổ vào bảng — 1 báo giá có thể có nhiều dòng cùng 1
+  // itemId (vd đàm phán giá khác nhau cho từng đợt), nhưng đơn hàng chỉ nên có đúng 1 dòng/item với số
+  // lượng đã cộng dồn. unitPrice = tổng lineTotal/tổng quantity (giá bình quân sau chiết khấu đã chốt ở
+  // báo giá, không phải giá niêm yết `price` gốc).
+  useEffect(() => {
+    if (!isOpen) return;
+    setEventName(`Sự kiện từ báo giá ${quotation.quotationCode}`);
+    setEventType('');
+    setEventDate('');
+    setLocation('');
+    setGuestCount('');
+    setNotes(quotation.notes ?? '');
+    const grouped = new Map<string, { quantity: number; lineTotal: number }>();
+    quotation.items.forEach((qi) => {
+      const acc = grouped.get(qi.itemId) ?? { quantity: 0, lineTotal: 0 };
+      acc.quantity += qi.quantity;
+      acc.lineTotal += qi.lineTotal;
+      grouped.set(qi.itemId, acc);
+    });
+    setItems(
+      Array.from(grouped.entries()).map(([itemId, acc]) => ({
+        key: nextDraftKey(),
+        itemId,
+        quantity: acc.quantity,
+        unitPrice: acc.quantity > 0 ? Math.round(acc.lineTotal / acc.quantity) : 0,
+      })),
+    );
+    setErrors({});
+    setSubmitError(null);
+    catalogApiService
+      .getItems({ limit: 200, status: 'ACTIVE' })
+      .then((res) => setItemList(res.data ?? []))
+      .catch(() => setItemList([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, quotation.quotationId]);
+
+  const itemById = useMemo(() => new Map(itemList.map((i) => [i.itemId, i])), [itemList]);
+  const quotationItemById = useMemo(() => new Map(quotation.items.map((qi) => [qi.itemId, qi])), [quotation.items]);
+  const itemOptions = useMemo(
+    () => itemList.map((i) => ({ value: i.itemId, label: `${i.itemName} (${formatCurrency(i.rentalPrice)})` })),
+    [itemList],
   );
 
-  const handleClose = () => {
-    setCurrentStep(3);
+  const nameForItemId = (itemId: string) => itemById.get(itemId)?.itemName ?? quotationItemById.get(itemId)?.itemName ?? itemId;
+
+  const resetAndClose = () => {
     onClose();
   };
 
-  const total = items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0);
-  const canContinueStep3 = Boolean(eventName.trim() && eventDate);
-
-  const updateItem = <K extends keyof AdminOrderLineItem>(idx: number, field: K, value: AdminOrderLineItem[K]) => {
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, [field]: value } : it)));
+  const handleAddItem = () => {
+    const first = itemList[0];
+    setItems((prev) => [...prev, { key: nextDraftKey(), itemId: first?.itemId ?? '', quantity: 1, unitPrice: first?.rentalPrice ?? 0 }]);
   };
-  const addManualItem = () => setItems((prev) => [...prev, emptyItem()]);
-  const removeItem = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
-  const handleSave = () => {
-    const orderId = nextAdminOrderId();
-    addAdminOrder({
-      orderId,
-      customerId: quotation.customerId,
-      customerName: quotation.customerName,
-      customerPhone: quotation.customerPhone,
-      weddingDate: eventDate,
-      weddingEndDate: eventDate,
-      venue,
-      guestCount,
-      totalPrice: total,
-      depositAmount: Math.round(total * 0.3),
-      status: 'NEW',
-      paymentStatus: alreadyDeposited ? 'DEPOSITED' : 'UNPAID',
-      coordinatorName,
-      packageType,
-      notes,
-      checklist: [],
-      items,
-      liveChecklist: {},
-      disputeLogs: [],
-      quotationId: quotation.quotationId,
-      // Kế thừa khảo sát đã lập từ báo giá (nếu có, xem "Lập kế hoạch khảo sát" ở trang chi tiết báo
-      // giá) — trước đây bỏ qua field này, khiến đơn mới luôn mất thông tin khảo sát dù báo giá gốc
-      // đã khảo sát xong, bắt xác nhận lại thủ công ở Mốc 2.
-      surveyAssignment: quotation.surveyAssignment,
-    });
-    onSaved();
+  const handleRemoveItem = (key: string) => setItems((prev) => prev.filter((item) => item.key !== key));
+
+  const handleItemChange = (key: string, itemId: string) => {
+    const item = itemById.get(itemId);
+    setItems((prev) => prev.map((row) => (row.key === key ? { ...row, itemId, unitPrice: item?.rentalPrice ?? row.unitPrice } : row)));
+  };
+
+  const handleQuantityChange = (key: string, quantity: number) =>
+    setItems((prev) => prev.map((item) => (item.key === key ? { ...item, quantity } : item)));
+
+  const handleUnitPriceChange = (key: string, unitPrice: number) =>
+    setItems((prev) => prev.map((item) => (item.key === key ? { ...item, unitPrice } : item)));
+
+  const totalAmount = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+
+  const validate = (): Record<string, string> => {
+    const next: Record<string, string> = {};
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    if (!eventDate) {
+      next.eventDate = 'Vui lòng chọn ngày tổ chức';
+    } else if (eventDate <= todayStr) {
+      next.eventDate = 'Ngày tổ chức phải sau ngày hôm nay';
+    }
+    if (!eventType) next.eventType = 'Vui lòng chọn loại sự kiện';
+    if (!location.trim()) next.location = 'Vui lòng nhập địa điểm tổ chức';
+    if (guestCount && Number(guestCount) < 1) next.guestCount = 'Số lượng khách phải lớn hơn 0';
+    if (items.length === 0) next.items = 'Vui lòng thêm ít nhất một hạng mục thiết bị/dịch vụ';
+    if (items.some((item) => !item.itemId)) next.items = 'Vui lòng chọn thiết bị/dịch vụ cho tất cả các hạng mục';
+    return next;
+  };
+
+  const handleSubmit = async () => {
+    const validationErrors = validate();
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) return;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await orderApiService.createOrder({
+        customerId: quotation.customerId,
+        quotationId: quotation.quotationId,
+        eventName: eventName.trim() || undefined,
+        eventType,
+        eventDate: new Date(eventDate).toISOString(),
+        location: location.trim(),
+        ...(guestCount ? { guestCount: Number(guestCount) } : {}),
+        items: items.map((item) => ({ itemId: item.itemId, quantity: item.quantity, unitPrice: item.unitPrice })),
+        notes: notes.trim() || undefined,
+      });
+      onCreated(res.data.orderId);
+    } catch (err) {
+      const axiosError = err as AxiosError<{ message?: string }>;
+      setSubmitError(axiosError.response?.data?.message ?? 'Không thể tạo đơn đặt từ báo giá này. Vui lòng thử lại.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={handleClose}
-      title="Tạo đơn đặt sự kiện"
-      subtitle={`Soạn lập đơn hàng chính thức từ báo giá ${quotation.code} đã duyệt.`}
-      size="2xl"
+      onClose={resetAndClose}
+      title="Sinh đơn đặt từ báo giá"
+      subtitle={`Tạo đơn đặt chính thức từ báo giá ${quotation.quotationCode} đã duyệt — đơn mới sẽ tự liên kết lại với báo giá này.`}
+      size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={resetAndClose} disabled={isSubmitting}>
+            Hủy
+          </Button>
+          <Button onClick={handleSubmit} isLoading={isSubmitting}>
+            <Check className="h-4 w-4" />
+            Tạo đơn đặt
+          </Button>
+        </>
+      }
     >
-      <div className="flex items-center justify-around rounded-xl border border-slate-200/80 bg-white p-4 shadow-xs">
-        {STEPS.map((item) => (
-          <div key={item.step} className="flex items-center gap-2">
-            <div
-              className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
-                currentStep >= item.step ? 'bg-blue-600 text-white shadow' : 'border border-slate-200 bg-slate-100 text-slate-400'
-              }`}
-            >
-              {item.step}
-            </div>
-            <span className={`hidden text-xs font-semibold md:inline ${currentStep >= item.step ? 'text-slate-900' : 'text-slate-400'}`}>{item.label}</span>
-            {item.step < 5 && <ArrowRight className="ml-2 hidden h-4 w-4 text-slate-300 md:inline" />}
+      <div className="space-y-5">
+        <div>
+          <div className="mb-3 flex items-center gap-2">
+            <User className="h-5 w-5 text-blue-600" />
+            <h3 className="text-sm font-semibold text-slate-900">Khách hàng (lấy từ báo giá)</h3>
           </div>
-        ))}
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
-        {currentStep === 1 && (
-          <div className="space-y-5 p-6">
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-950">Bước 1: Khách hàng chịu trách nhiệm đơn</h4>
-              <p className="text-xs text-slate-500">Lấy sẵn từ báo giá {quotation.code} — mọi tài chính, thanh toán cọc sẽ gán vào khách hàng này.</p>
-            </div>
-            <div className="space-y-1.5 rounded-lg border border-slate-100 bg-slate-50 p-4 text-xs">
-              <p className="font-bold text-blue-900">Chi tiết khách hàng:</p>
-              <p>
-                <span className="text-slate-400">Tên:</span> <strong className="text-slate-900">{quotation.customerName}</strong>
-              </p>
-              <p>
-                <span className="text-slate-400">Số điện thoại:</span> {quotation.customerPhone}
-              </p>
-            </div>
-            <div className="flex justify-end border-t border-slate-100 pt-4">
-              <Button onClick={() => setCurrentStep(2)}>
-                Tiếp tục
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+          <div className="grid grid-cols-1 gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-600 sm:grid-cols-3">
+            <span>
+              <span className="text-slate-400">Tên: </span>
+              <span className="font-medium text-slate-900">{quotation.customerName}</span>
+            </span>
+            <span>
+              <span className="text-slate-400">SĐT: </span>
+              {quotation.customerPhone}
+            </span>
+            <span>
+              <span className="text-slate-400">Giá trị báo giá: </span>
+              <span className="font-medium text-slate-900">{formatCurrency(quotation.totalAmount)}</span>
+            </span>
           </div>
-        )}
+        </div>
 
-        {currentStep === 2 && (
-          <div className="space-y-5 p-6">
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-950">Bước 2: Báo giá liên quan</h4>
-              <p className="text-xs text-slate-500">Đơn đặt này được sinh từ báo giá đã duyệt dưới đây.</p>
-            </div>
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 text-xs">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-4 w-4 items-center justify-center rounded border border-blue-600 bg-blue-600 text-white">
-                    <Check className="h-3 w-3" />
-                  </span>
-                  <strong className="font-bold text-slate-900">{quotation.code}</strong>
-                  <span className="text-[10px] text-slate-400">v{quotation.version}</span>
-                </div>
-                <p className="max-w-md truncate text-slate-500">{quotation.notes || 'Không có ghi chú.'}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-extrabold text-slate-900">{formatCurrency(quotation.totalAmount)}</p>
-                <p className="text-[10px] text-slate-400">{quotation.items.length} hạng mục</p>
-              </div>
-            </div>
-            <p className="text-[11px] italic text-slate-400">Mỗi đơn đặt hiện chỉ liên kết được với 1 báo giá.</p>
-            <div className="flex justify-between border-t border-slate-100 pt-4">
-              <Button variant="secondary" onClick={() => setCurrentStep(1)}>
-                <ArrowLeft className="h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button onClick={() => setCurrentStep(3)}>
-                Tiếp tục
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+        <div className="border-t border-slate-100 pt-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Package className="h-5 w-5 text-blue-600" />
+            <h3 className="text-sm font-semibold text-slate-900">Thông tin đơn hàng</h3>
           </div>
-        )}
-
-        {currentStep === 3 && (
-          <div className="space-y-5 p-6">
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-950">Bước 3: Khai báo thông tin sự kiện tổ chức</h4>
-              <p className="text-xs text-slate-500">Lịch diễn ra, sảnh tổ chức, và dung lượng khách.</p>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Input label="Tên sự kiện / Chương trình" required value={eventName} onChange={(e) => setEventName(e.target.value)} />
-              <Input label="Ngày tổ chức sự kiện" type="date" required value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Select label="Sảnh tổ chức" required value={venue} onChange={(e) => setVenue(e.target.value)} options={VENUE_OPTIONS.map((v) => ({ value: v, label: v }))} />
-              <Input label="Số lượng khách mời" type="number" min={10} value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value) || 0)} />
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Select
-                label="Gói dịch vụ"
-                value={packageType}
-                onChange={(e) => setPackageType(e.target.value)}
-                options={PACKAGE_OPTIONS.map((p) => ({ value: p, label: p }))}
-              />
-              <Select
-                label="Điều phối viên phụ trách"
-                value={coordinatorName}
-                onChange={(e) => setCoordinatorName(e.target.value)}
-                options={COORDINATOR_POOL.map((c) => ({ value: c, label: c }))}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input label="Tên sự kiện" value={eventName} onChange={(e) => setEventName(e.target.value)} />
+            <Select
+              label="Loại sự kiện"
+              required
+              error={errors.eventType}
+              placeholder="Chọn loại sự kiện"
+              value={eventType}
+              onChange={(e) => setEventType(e.target.value)}
+              options={EVENT_TYPE_OPTIONS}
+            />
+            <Input
+              type="date"
+              label="Ngày tổ chức"
+              required
+              value={eventDate}
+              error={errors.eventDate}
+              onChange={(e) => setEventDate(e.target.value)}
+            />
+            <Input
+              type="number"
+              label="Số lượng khách"
+              min={1}
+              placeholder="VD: 200"
+              value={guestCount}
+              error={errors.guestCount}
+              onChange={(e) => setGuestCount(e.target.value)}
+            />
+            <div className="sm:col-span-2">
+              <Input
+                label="Địa điểm tổ chức"
+                required
+                placeholder="VD: 123 Đường ABC, Quận 1, TP.HCM"
+                value={location}
+                error={errors.location}
+                onChange={(e) => setLocation(e.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="event-notes" className="text-sm font-medium text-gray-700">
-                Mô tả cụ thể / Lưu ý vận chuyển
-              </label>
-              <textarea
-                id="event-notes"
-                rows={3}
-                placeholder="Kích thước cửa ra vào, giờ thi công, lưu ý nguồn điện của khách sạn..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="block w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex justify-between border-t border-slate-100 pt-4">
-              <Button variant="secondary" onClick={() => setCurrentStep(2)}>
-                <ArrowLeft className="h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button disabled={!canContinueStep3} onClick={() => setCurrentStep(4)}>
-                Tiếp tục
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
           </div>
-        )}
+        </div>
 
-        {currentStep === 4 && (
-          <div className="space-y-5 p-6">
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-950">Bước 4: Danh sách trang thiết bị sự kiện điều phối</h4>
-              <p className="text-xs text-slate-500">Lấy sẵn từ hạng mục báo giá {quotation.code} — chỉnh sửa nguồn kho, đơn giá chốt nếu cần.</p>
-            </div>
-
-            <div className="overflow-hidden rounded-lg border border-slate-200 text-xs">
-              <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left">
-                <thead className="border-b border-slate-100 bg-slate-50 font-semibold uppercase tracking-wider text-slate-600">
-                  <tr>
-                    <th className="px-3 py-2.5">Tên thiết bị / Hạng mục</th>
-                    <th className="w-16 px-3 py-2.5 text-center">SL</th>
-                    <th className="w-28 px-3 py-2.5 text-right">Đơn giá (đ)</th>
-                    <th className="w-24 px-3 py-2.5 text-center">Nguồn kho</th>
-                    <th className="px-3 py-2.5 text-right">Thành tiền</th>
-                    <th className="w-10 px-3 py-2.5 text-center">Xóa</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {items.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-6 text-center italic text-slate-400">
-                        Chưa có hạng mục nào. Bấm thêm hạng mục bên dưới để cấu hình.
-                      </td>
-                    </tr>
-                  ) : (
-                    items.map((item, idx) => (
-                      <tr key={item.id} className="hover:bg-slate-50/50">
-                        <td className="px-2 py-2">
-                          <input
-                            type="text"
-                            placeholder="Màn hình LED P3..."
-                            value={item.description}
-                            onChange={(e) => updateItem(idx, 'description', e.target.value)}
-                            className="w-full rounded border bg-slate-50 px-2 py-1 focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            min={1}
-                            value={item.quantity}
-                            onChange={(e) => updateItem(idx, 'quantity', Number(e.target.value) || 1)}
-                            className="w-full rounded border bg-slate-50 px-1 py-1 text-center font-bold focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            min={0}
-                            value={item.unitPrice}
-                            onChange={(e) => updateItem(idx, 'unitPrice', Number(e.target.value) || 0)}
-                            className="w-full rounded border bg-slate-50 px-2 py-1 text-right font-medium focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <select
-                            value={item.source}
-                            onChange={(e) => updateItem(idx, 'source', e.target.value as AdminOrderLineItem['source'])}
-                            className="w-full rounded border bg-slate-50 py-1 text-center font-semibold text-slate-700 focus:outline-none"
-                          >
-                            <option value="internal">Kho nhà</option>
-                            <option value="external">Thuê ngoài</option>
-                          </select>
-                        </td>
-                        <td className="px-2 py-2 pr-3 text-right font-bold text-slate-900">{formatCurrency(item.quantity * item.unitPrice)}</td>
-                        <td className="px-2 py-2 text-center">
-                          <button type="button" onClick={() => removeItem(idx)} className="text-slate-400 hover:text-red-600">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <button type="button" onClick={addManualItem} className="flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 font-bold text-slate-800 transition hover:bg-slate-200">
-                <Plus className="h-3.5 w-3.5" />
-                Thêm dòng nhập tay
-              </button>
-              <p>
-                Tổng trị giá chốt: <strong className="text-sm text-blue-700">{formatCurrency(total)}</strong>
-              </p>
-            </div>
-
-            <div className="flex justify-between border-t border-slate-100 pt-4">
-              <Button variant="secondary" onClick={() => setCurrentStep(3)}>
-                <ArrowLeft className="h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button disabled={items.length === 0} onClick={() => setCurrentStep(5)}>
-                Tiếp tục
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+        <div className="border-t border-slate-100 pt-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-900">Hạng mục thiết bị/dịch vụ</h3>
+            <Button type="button" variant="secondary" size="sm" onClick={handleAddItem} disabled={itemList.length === 0}>
+              <Plus className="h-4 w-4" />
+              Thêm hạng mục
+            </Button>
           </div>
-        )}
 
-        {currentStep === 5 && (
-          <div className="space-y-5 p-6">
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-slate-950">Bước 5: Xác nhận & Đưa đơn vào vận hành</h4>
-              <p className="text-xs text-slate-500">Kiểm tra thông số tổng trước khi lưu đơn đặt.</p>
+          {items.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
+              Chưa có hạng mục nào. Đơn hàng cần ít nhất 1 hạng mục thiết bị/dịch vụ.
             </div>
+          ) : (
+            <div className="space-y-3">
+              {items.map((item, idx) => {
+                const lineTotal = item.quantity * item.unitPrice;
+                return (
+                  <div key={item.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-end">
+                      <div className="sm:col-span-5">
+                        <Select
+                          label={`Hạng mục #${idx + 1}`}
+                          value={item.itemId}
+                          placeholder="-- Chọn thiết bị/dịch vụ --"
+                          onChange={(e) => handleItemChange(item.key, e.target.value)}
+                          options={
+                            itemOptions.some((o) => o.value === item.itemId) || !item.itemId
+                              ? itemOptions
+                              : [{ value: item.itemId, label: `${nameForItemId(item.itemId)} (từ báo giá)` }, ...itemOptions]
+                          }
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Input
+                          type="number"
+                          label="Số lượng"
+                          min={1}
+                          value={item.quantity}
+                          onChange={(e) => handleQuantityChange(item.key, Math.max(1, Number(e.target.value) || 1))}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Input
+                          type="number"
+                          label="Đơn giá (đ)"
+                          min={0}
+                          value={item.unitPrice}
+                          onChange={(e) => handleUnitPriceChange(item.key, Math.max(0, Number(e.target.value) || 0))}
+                        />
+                      </div>
+                      <div className="sm:col-span-2 text-sm">
+                        <span className="mb-1 block text-xs font-medium text-slate-500">Thành tiền</span>
+                        <span className="font-bold text-slate-900">{formatCurrency(lineTotal)}</span>
+                      </div>
+                      <div className="flex justify-end sm:col-span-1">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItem(item.key)}
+                          className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          title="Xóa hạng mục"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex justify-end text-sm font-bold text-slate-900">Tổng tiền: {formatCurrency(totalAmount)}</div>
+            </div>
+          )}
+          {errors.items && <p className="mt-2 text-sm text-red-600">{errors.items}</p>}
+        </div>
 
-            <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50 p-5 text-xs">
-              <div className="grid grid-cols-1 gap-4 border-b border-slate-200 pb-3 sm:grid-cols-2">
-                <p>
-                  <span className="block text-[10px] font-bold uppercase text-slate-400">Chủ đơn khách hàng</span>
-                  <strong className="text-sm text-slate-900">{quotation.customerName}</strong>
-                </p>
-                <p>
-                  <span className="block text-[10px] font-bold uppercase text-slate-400">Tên sự kiện</span>
-                  <strong className="text-sm text-slate-900">{eventName}</strong>
-                </p>
-              </div>
-              <div className="grid grid-cols-1 gap-4 border-b border-slate-200 pb-3 sm:grid-cols-3">
-                <p>
-                  <span className="text-slate-400">Ngày diễn ra:</span> <strong className="text-slate-900">{eventDate}</strong>
-                </p>
-                <p>
-                  <span className="text-slate-400">Số lượng khách:</span> <strong className="text-slate-900">{guestCount} khách</strong>
-                </p>
-                <p>
-                  <span className="text-slate-400">Sảnh tổ chức:</span> <strong className="text-slate-900">{venue}</strong>
-                </p>
-              </div>
-              <div className="flex items-center justify-between text-xs font-bold text-slate-900">
-                <span>Trị giá chốt sau cùng:</span>
-                <span className="text-base text-blue-700">{formatCurrency(total)}</span>
-              </div>
-            </div>
+        <div className="border-t border-slate-100 pt-5">
+          <label htmlFor="qo-notes" className="text-sm font-medium text-gray-700">
+            Ghi chú
+          </label>
+          <textarea
+            id="qo-notes"
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Lưu ý vận chuyển, giờ thi công..."
+            className="mt-1 block w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
 
-            <div className="space-y-3 rounded-xl border border-slate-100 p-5 text-xs">
-              <p className="text-sm font-bold text-slate-950">Mốc 2 — Xác nhận cọc &amp; khảo sát hiện trường</p>
-              {quotation.surveyAssignment ? (
-                <div className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-emerald-700">
-                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <p>
-                    Đã kế thừa khảo sát hiện trường từ báo giá {quotation.code}: <strong>{quotation.surveyAssignment.assigneeName}</strong> —{' '}
-                    {quotation.surveyAssignment.date} {quotation.surveyAssignment.time}. Không cần khảo sát lại.
-                  </p>
-                </div>
-              ) : (
-                <p className="italic text-slate-400">Báo giá chưa có khảo sát hiện trường — sau khi tạo đơn vẫn cần xác nhận khảo sát ở Mốc 2.</p>
-              )}
-              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={alreadyDeposited}
-                  onChange={(e) => setAlreadyDeposited(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <span>Khách hàng đã đặt cọc trước khi lập đơn</span>
-              </label>
-              {alreadyDeposited && quotation.surveyAssignment && (
-                <p className="italic text-emerald-600">Đã chọn cả 2 việc — đơn sẽ hoàn thành sẵn Mốc 2 ngay sau khi lưu.</p>
-              )}
-            </div>
-
-            <div className="flex justify-between border-t border-slate-100 pt-4">
-              <Button variant="secondary" onClick={() => setCurrentStep(4)}>
-                <ArrowLeft className="h-4 w-4" />
-                Quay lại
-              </Button>
-              <Button onClick={handleSave}>
-                <Check className="h-4 w-4" />
-                Lưu đơn đặt & liên kết báo giá
-              </Button>
-            </div>
-          </div>
-        )}
+        {submitError && <p className="text-sm text-red-600">{submitError}</p>}
       </div>
     </Modal>
   );

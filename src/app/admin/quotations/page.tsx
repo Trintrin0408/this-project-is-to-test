@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Eye, Plus, RotateCcw, Search } from 'lucide-react';
@@ -14,60 +14,98 @@ import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
-import { AdminQuotationRow, AdminQuotationStatus, QUOTATION_STATUS_META, getAdminQuotations } from '@/mocks/db/quotations';
+import { quotationApiService } from '@/services/quotation.service';
+import { QUOTATION_STATUS_META } from '@/mocks/db/quotations';
+import type { QuotationListItem, QuotationListMeta, QuotationListStatus } from '@/types/quotation';
 
-// Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminQuotationsMock.ts. Không gọi
-// quotationApiService, không đồng bộ với docs/api/08-quotations.md.
+// Nối API thật theo docs/danhsachbaogia_api.md — GET /quotations đã trả sẵn customerName/customerPhone
+// (JOIN) + meta.counts (dùng thẳng cho 5 thẻ KPI). Theo Hướng A đã chốt ở doc mục 3.1: bỏ hẳn trạng
+// thái "Đang khảo sát" khỏi bộ lọc/KPI màn này — đó là Order đang khảo sát, chưa có bản ghi Quotation
+// nào cả (khác domain, xem /manager/survey). Bộ lọc "Tất cả khách hàng" (doc mục 4.2) cũng bỏ khỏi UI —
+// dropdown cũ chỉ liệt kê tên khách từ đúng 10 dòng đang tải ở client, sai khi có phân trang server thật
+// (không thấy hết khách của các trang khác); ô tìm kiếm hiện có đã tìm được theo tên khách nên không mất
+// tính năng. Version đổi từ number sang string thật (không tự thêm tiền tố "v" nữa — DB đã lưu sẵn).
+
+const emptyMeta: QuotationListMeta = {
+  page: 1,
+  limit: 10,
+  totalItems: 0,
+  totalPages: 1,
+  counts: { all: 0, draft: 0, approved: 0, rejected: 0, approvedValue: 0 },
+};
 
 export default function AdminQuotationsPage() {
-  const [rows, setRows] = useState<AdminQuotationRow[]>(() => getAdminQuotations());
+  const [rows, setRows] = useState<QuotationListItem[]>([]);
+  const [meta, setMeta] = useState<QuotationListMeta>(emptyMeta);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusFilter, setStatusFilter] = useState<AdminQuotationStatus | ''>('');
-  const [customerFilter, setCustomerFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<QuotationListStatus | ''>('');
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const customerOptions = useMemo(() => Array.from(new Set(rows.map((r) => r.customerName))).sort(), [rows]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter]);
 
-  const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return rows
-      .filter((row) => {
-        if (statusFilter && row.status !== statusFilter) return false;
-        if (customerFilter && row.customerName !== customerFilter) return false;
-        if (!term) return true;
-        return row.code.toLowerCase().includes(term) || row.customerName.toLowerCase().includes(term);
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setLoadError(null);
+    quotationApiService
+      .getQuotations({ page, limit, search: search.trim() || undefined, status: statusFilter || undefined })
+      .then((res) => {
+        if (cancelled) return;
+        setRows(res.data ?? []);
+        setMeta(res.meta ?? emptyMeta);
       })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [rows, search, statusFilter, customerFilter]);
+      .catch(() => {
+        if (cancelled) return;
+        setRows([]);
+        setLoadError('Không tải được danh sách báo giá. Vui lòng thử lại.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, search, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / limit));
-  const safePage = Math.min(page, totalPages);
-  const pageRows = filteredRows.slice((safePage - 1) * limit, safePage * limit);
-  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredRows.length, limit };
+  const refetch = () => {
+    quotationApiService
+      .getQuotations({ page: 1, limit, search: search.trim() || undefined, status: statusFilter || undefined })
+      .then((res) => {
+        setPage(1);
+        setRows(res.data ?? []);
+        setMeta(res.meta ?? emptyMeta);
+      })
+      .catch(() => undefined);
+  };
 
-  const draftCount = rows.filter((r) => r.status === 'draft').length;
-  const approvedRows = rows.filter((r) => r.status === 'approved');
-  const rejectedCount = rows.filter((r) => r.status === 'rejected').length;
-  const approvedValue = approvedRows.reduce((sum, r) => sum + r.totalAmount, 0);
+  const paginationState: PaginationState = {
+    currentPage: meta.page,
+    totalPages: Math.max(1, meta.totalPages),
+    totalItems: meta.totalItems,
+    limit: meta.limit,
+  };
 
   const kpiItems: { label: string; value: string; valueClassName: string }[] = [
-    { label: 'Tổng báo giá', value: String(rows.length), valueClassName: 'text-slate-900' },
-    { label: 'Dự thảo nháp', value: String(draftCount), valueClassName: 'text-slate-900' },
-    { label: 'Đã phê duyệt', value: String(approvedRows.length), valueClassName: 'text-green-600' },
-    { label: 'Bị từ chối', value: String(rejectedCount), valueClassName: 'text-red-600' },
-    { label: 'Giá trị đã phê duyệt', value: formatCurrency(approvedValue), valueClassName: 'text-slate-900' },
+    { label: 'Tổng báo giá', value: String(meta.counts.all), valueClassName: 'text-slate-900' },
+    { label: 'Dự thảo nháp', value: String(meta.counts.draft), valueClassName: 'text-slate-900' },
+    { label: 'Đã phê duyệt', value: String(meta.counts.approved), valueClassName: 'text-green-600' },
+    { label: 'Bị từ chối', value: String(meta.counts.rejected), valueClassName: 'text-red-600' },
+    { label: 'Giá trị đã phê duyệt', value: formatCurrency(meta.counts.approvedValue), valueClassName: 'text-slate-900' },
   ];
 
   const handleResetFilters = () => {
     setSearchInput('');
     setStatusFilter('');
-    setCustomerFilter('');
   };
 
-  const columns: TableColumn<AdminQuotationRow>[] = [
+  const columns: TableColumn<QuotationListItem>[] = [
     {
       key: 'code',
       label: 'Mã báo giá',
@@ -86,7 +124,7 @@ export default function AdminQuotationsPage() {
     {
       key: 'version',
       label: 'Phiên bản',
-      render: (row) => <span className="text-slate-600">v{row.version}</span>,
+      render: (row) => <span className="text-slate-600">{row.version}</span>,
     },
     {
       key: 'subtotal',
@@ -140,7 +178,6 @@ export default function AdminQuotationsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Quản lý báo giá</h1>
           <p className="mt-1 text-sm text-slate-500">Tạo mới, phê duyệt, lưu nháp hoặc từ chối các báo giá sự kiện.</p>
-          <p className="mt-1 text-xs italic text-slate-400">Đang hiển thị dữ liệu minh họa (giao diện thuần, chưa nối API báo giá thật).</p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)}>
           <Plus className="h-4 w-4" />
@@ -184,21 +221,13 @@ export default function AdminQuotationsPage() {
           <div className="w-48">
             <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as AdminQuotationStatus | '')}
+              onChange={(e) => setStatusFilter(e.target.value as QuotationListStatus | '')}
               options={[
                 { value: '', label: 'Tất cả trạng thái' },
-                ...(Object.keys(QUOTATION_STATUS_META) as AdminQuotationStatus[]).map((s) => ({
-                  value: s,
-                  label: QUOTATION_STATUS_META[s].label,
-                })),
+                { value: 'draft', label: QUOTATION_STATUS_META.draft.label },
+                { value: 'approved', label: QUOTATION_STATUS_META.approved.label },
+                { value: 'rejected', label: QUOTATION_STATUS_META.rejected.label },
               ]}
-            />
-          </div>
-          <div className="w-48">
-            <Select
-              value={customerFilter}
-              onChange={(e) => setCustomerFilter(e.target.value)}
-              options={[{ value: '', label: 'Tất cả khách hàng' }, ...customerOptions.map((c) => ({ value: c, label: c }))]}
             />
           </div>
           <Button variant="secondary" className="ml-auto" onClick={handleResetFilters}>
@@ -208,7 +237,13 @@ export default function AdminQuotationsPage() {
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          <Table columns={columns} rows={pageRows} rowKey={(row) => row.quotationId} />
+          {isLoading ? (
+            <p className="py-10 text-center text-sm text-slate-400">Đang tải danh sách báo giá...</p>
+          ) : loadError ? (
+            <p className="py-10 text-center text-sm text-red-500">{loadError}</p>
+          ) : (
+            <Table columns={columns} rows={rows} rowKey={(row) => row.quotationId} />
+          )}
         </div>
 
         <Pagination pagination={paginationState} onPageChange={setPage} />
@@ -218,7 +253,7 @@ export default function AdminQuotationsPage() {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onSaved={() => {
-          setRows(getAdminQuotations());
+          refetch();
           setIsCreateOpen(false);
         }}
       />

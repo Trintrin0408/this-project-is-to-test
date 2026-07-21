@@ -89,10 +89,14 @@ export interface AdminSupplier {
   supplierId: string;
   supplierCode: string;
   supplierName: string;
+  contactPerson: string;
   phone: string;
   email: string;
   address: string;
   serviceType: string;
+  /** Không đọc trực tiếp field này trên store — luôn bị `getAdminSuppliers`/`getAdminSupplierById`
+   * ghi đè bằng tổng tính động từ `transactions` (xem `computeDebtBalance`), để không lệch dần khi
+   * `recordSupplierPayment`/`approveSupplierReturnSlip` cập nhật paidAmount/compensationAmount. */
   debtBalance: number;
   status: SupplierStatus;
   transactions: SupplierTransactionSummary[];
@@ -118,11 +122,12 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-1',
     supplierCode: 'SUP002',
     supplierName: 'Ánh Sáng Pro',
+    contactPerson: 'Trần Văn Hùng',
     phone: '0978 123 456',
     email: 'proline.av@yahoo.com',
     address: 'Hoàng Mai, Hà Nội',
     serviceType: 'Âm thanh biểu diễn',
-    debtBalance: 12_500_000,
+    debtBalance: 0, // bỏ qua khi đọc — luôn tính lại từ transactions[] (withComputedDebtBalance)
     status: 'ACTIVE',
     transactions: [
       {
@@ -168,11 +173,12 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-2',
     supplierCode: 'SUP_TL',
     supplierName: 'Tùng Lâm Decor',
+    contactPerson: 'Nguyễn Thị Lâm',
     phone: '0987 654 321',
     email: 'tunglamdecor@gmail.com',
     address: 'Thanh Xuân, Hà Nội',
     serviceType: 'Hoa tươi cắm tiệc',
-    debtBalance: 8_750_000,
+    debtBalance: 0, // bỏ qua khi đọc — luôn tính lại từ transactions[] (withComputedDebtBalance)
     status: 'ACTIVE',
     transactions: [
       {
@@ -224,11 +230,12 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-3',
     supplierCode: 'SUP_HD',
     supplierName: 'Hoàng Duy Audio',
+    contactPerson: 'Lê Hoàng Duy',
     phone: '0912 345 678',
     email: 'hoangduyaudio@gmail.com',
     address: 'Hai Bà Trưng, Hà Nội',
     serviceType: 'Âm thanh biểu diễn',
-    debtBalance: 17_500_000,
+    debtBalance: 0, // bỏ qua khi đọc — luôn tính lại từ transactions[] (withComputedDebtBalance)
     status: 'ACTIVE',
     transactions: [
       {
@@ -273,6 +280,7 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-4',
     supplierCode: 'SUP_NC',
     supplierName: 'Nội Thất Ngọc Châu',
+    contactPerson: 'Phạm Ngọc Châu',
     phone: '0902 456 679',
     email: 'ngocchaunoithat@gmail.com',
     address: 'Ba Đình, Hà Nội',
@@ -302,6 +310,7 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-5',
     supplierCode: 'SUP_MP',
     supplierName: 'Minh Phát Flowers',
+    contactPerson: 'Đỗ Minh Phát',
     phone: '0933 789 123',
     email: 'minhphatflowers@gmail.com',
     address: 'Cầu Giấy, Hà Nội',
@@ -348,11 +357,12 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-6',
     supplierCode: 'SUP_VP',
     supplierName: 'Việt Phát Furniture',
+    contactPerson: 'Hoàng Việt Phát',
     phone: '0977 234 567',
     email: 'vietphatfurniture@gmail.com',
     address: 'Đống Đa, Hà Nội',
     serviceType: 'Nội thất bàn ghế',
-    debtBalance: 9_450_000,
+    debtBalance: 0, // bỏ qua khi đọc — luôn tính lại từ transactions[] (withComputedDebtBalance)
     status: 'ACTIVE',
     transactions: [
       {
@@ -397,11 +407,12 @@ const SEED_SUPPLIERS: AdminSupplier[] = [
     supplierId: 'sup-7',
     supplierCode: 'SUP_TT',
     supplierName: 'Thiên Trường Rạp Cưới',
+    contactPerson: 'Vũ Thiên Trường',
     phone: '0966 345 678',
     email: 'thientruongrap@gmail.com',
     address: 'Long Biên, Hà Nội',
     serviceType: 'Khung rạp & bạt che',
-    debtBalance: 4_200_000,
+    debtBalance: 0, // bỏ qua khi đọc — luôn tính lại từ transactions[] (withComputedDebtBalance)
     status: 'INACTIVE',
     transactions: [
       {
@@ -429,17 +440,27 @@ const supplierStore = createMockStore<AdminSupplier>('suppliers', SEED_SUPPLIERS
 let supplierSeq = SEED_SUPPLIERS.length;
 let transactionSeq = SEED_SUPPLIERS.reduce((sum, s) => sum + s.transactions.length, 0);
 
+/** Tổng dư nợ hiện tại = tổng dư nợ còn lại của từng giao dịch (mục 3.1 docs/supplier_api.md,
+ * hướng (2) được khuyến nghị) — tính lại mỗi lần đọc thay vì tin field `debtBalance` lưu tĩnh, để
+ * luôn khớp `paidAmount`/`compensationAmount`/`supplierDeduction` mới nhất của đối tác. */
+function withComputedDebtBalance(supplier: AdminSupplier): AdminSupplier {
+  const debtBalance = supplier.transactions.reduce((sum, t) => sum + getSupplierTransactionRemainingDebt(t), 0);
+  return { ...supplier, debtBalance };
+}
+
 export function getAdminSuppliers(): AdminSupplier[] {
-  return supplierStore.getAll();
+  return supplierStore.getAll().map(withComputedDebtBalance);
 }
 
 export function getAdminSupplierById(id: string): AdminSupplier | undefined {
-  return supplierStore.getById(id);
+  const supplier = supplierStore.getById(id);
+  return supplier ? withComputedDebtBalance(supplier) : undefined;
 }
 
 export interface AdminSupplierFormValues {
   supplierCode: string;
   supplierName: string;
+  contactPerson: string;
   phone: string;
   address: string;
   serviceType: string;
@@ -451,6 +472,7 @@ export function createAdminSupplier(values: AdminSupplierFormValues): AdminSuppl
     supplierId: `sup-${supplierSeq}`,
     supplierCode: values.supplierCode,
     supplierName: values.supplierName,
+    contactPerson: values.contactPerson,
     phone: values.phone,
     email: '',
     address: values.address,

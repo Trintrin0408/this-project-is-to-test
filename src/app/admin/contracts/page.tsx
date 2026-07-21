@@ -1,90 +1,117 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Ban, Calendar, Eye, FileSignature, Plus, RotateCcw, Search, ShoppingBag } from 'lucide-react';
+import { Ban, Calendar, Eye, FileSignature, RotateCcw, Search, ShoppingBag } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
+import { Badge, getStatusBadgeVariant, type BadgeVariant } from '@/components/ui/Badge';
 import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
 import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
 import DashboardStats, { KpiCardItem } from '@/components/reports/DashboardStats';
-import CreateOrderPickQuotationModal from '@/components/orders/CreateOrderPickQuotationModal';
-import CreateOrderFromQuotationModal from '@/components/quotations/CreateOrderFromQuotationModal';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { formatDate } from '@/utils/formatDate';
-import {
-  AdminOrderRow,
-  BOOKING_STATUS_META,
-  BookingStatus,
-  PAYMENT_STATUS_META,
-  PaymentStatus,
-  getAdminOrders,
-  updateAdminOrder,
-} from '@/mocks/db/orders';
-import { AdminQuotationRow, getAdminQuotationById } from '@/mocks/db/quotations';
+import { orderApiService } from '@/services/order.service';
+import { ORDER_PAYMENT_STATUS_LABEL, ORDER_STATUS_LABEL } from '@/constants/order-status';
+import type { Order, OrderPaymentStatus, OrderStatus } from '@/types/order';
 
-// Trang thuần giao diện — theo Hướng A đã chốt ở docs/danhsachhopdong_api.md mục 1.5: khái niệm "Hợp
-// đồng" không có bảng thật nào trong DB và xung đột trực tiếp với luồng Order đã có sẵn
-// (CreateOrderFromQuotationModal ở trang chi tiết báo giá), nên màn này không còn là 1 entity Contract
-// riêng (đã bỏ mocks/adminContractsMock.ts + ContractCreateModal.tsx khỏi luồng chính) — giờ là 1 VIEW
-// LỌC của Order: chỉ hiển thị đơn đặt có `quotationId` (tức được sinh từ 1 báo giá đã duyệt), dùng
-// nguyên `db/orders.ts` làm nguồn dữ liệu duy nhất, không tự sinh lại thông tin khách hàng/sự kiện lần
-// thứ 2 như bản Contract cũ. Route/tên trang giữ nguyên `/admin/contracts` (theo điều hướng Sidebar hiện
-// có) — chỉ đổi lại phần nội dung/dữ liệu bên trong theo đúng thực thể thật.
+// Nối API thật theo docs/danhsachhopdong_api.md — đã áp dụng Hướng A đã chốt trước đó (comment cũ ở
+// đầu file này, giữ nguyên tinh thần): "Hợp đồng" không có bảng thật, màn này chỉ là 1 VIEW LỌC của
+// Order (chỉ hiển thị đơn có quotationId — được sinh từ báo giá đã duyệt), dùng lại nguyên
+// orderApiService/GetOrdersQuery đã có sẵn, không có entity/endpoint riêng nào cho "Hợp đồng" cả.
+//
+// PHÁT HIỆN MỚI khi nối API thật (ngoài phạm vi doc gốc, xem docs/more-require.md mục (r)):
+// `GET /api/v1/orders` (danh sách) KHÔNG trả field `quotationId` (chỉ `GET /orders/:id` — chi tiết —
+// mới có field này) — không thể lọc "đơn có quotationId" chỉ bằng 1 lần gọi danh sách. Vì tổng số đơn
+// hiện còn rất nhỏ (nghiệp vụ tổ chức sự kiện, không phải khối lượng thương mại điện tử), FE tạm chấp
+// nhận N+1: gọi danh sách rồi gọi CHI TIẾT từng đơn để biết `quotationId` — đã ghi rõ yêu cầu Backend
+// thêm field này vào response danh sách để bỏ N+1 khi cần scale.
+//
+// Nút "Tạo đơn từ báo giá" tạm khóa — cùng lý do đã ghi ở docs/more-require.md mục (q):
+// `CreateOrderFromQuotationModal`/`CreateOrderPickQuotationModal` nhận dữ liệu theo shape mock cũ
+// (`AdminQuotationRow`), chưa tương thích với API thật đã nối ở các màn báo giá — cần nối lại riêng.
 
-const STATUS_TABS: { value: BookingStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'Tất cả' },
-  { value: 'NEW', label: BOOKING_STATUS_META.NEW.label },
-  { value: 'CONFIRMED', label: BOOKING_STATUS_META.CONFIRMED.label },
-  { value: 'IN_PROGRESS', label: BOOKING_STATUS_META.IN_PROGRESS.label },
-  { value: 'COMPLETED', label: BOOKING_STATUS_META.COMPLETED.label },
-  { value: 'CANCELLED', label: BOOKING_STATUS_META.CANCELLED.label },
+const STATUS_TABS: { value: OrderStatus | 'ALL'; label: string }[] = [
+  { value: 'ALL', label: 'Tất cả' },
+  { value: 'NEW', label: ORDER_STATUS_LABEL.NEW },
+  { value: 'CONFIRMED', label: ORDER_STATUS_LABEL.CONFIRMED },
+  { value: 'IN_PROGRESS', label: ORDER_STATUS_LABEL.IN_PROGRESS },
+  { value: 'COMPLETED', label: ORDER_STATUS_LABEL.COMPLETED },
+  { value: 'CANCELLED', label: ORDER_STATUS_LABEL.CANCELLED },
 ];
 
-const PAYMENT_STATUS_FILTER_OPTIONS: { value: PaymentStatus | 'All'; label: string }[] = [
-  { value: 'All', label: 'Tất cả thanh toán' },
-  { value: 'UNPAID', label: PAYMENT_STATUS_META.UNPAID.label },
-  { value: 'DEPOSITED', label: PAYMENT_STATUS_META.DEPOSITED.label },
-  { value: 'PAID', label: PAYMENT_STATUS_META.PAID.label },
+const PAYMENT_STATUS_FILTER_OPTIONS: { value: OrderPaymentStatus | 'ALL'; label: string }[] = [
+  { value: 'ALL', label: 'Tất cả thanh toán' },
+  { value: 'UNPAID', label: ORDER_PAYMENT_STATUS_LABEL.UNPAID },
+  { value: 'DEPOSITED', label: ORDER_PAYMENT_STATUS_LABEL.DEPOSITED },
+  { value: 'PAID', label: ORDER_PAYMENT_STATUS_LABEL.PAID },
 ];
+
+const PAYMENT_BADGE_VARIANT: Record<OrderPaymentStatus, BadgeVariant> = {
+  UNPAID: 'neutral',
+  DEPOSITED: 'warning',
+  PAID: 'success',
+};
+
+interface OrderFromQuotation extends Order {
+  quotationId: string;
+}
 
 export default function AdminContractsPage() {
-  const [orders, setOrders] = useState<AdminOrderRow[]>(() => getAdminOrders());
-  const ordersFromQuotation = useMemo(() => orders.filter((o) => Boolean(o.quotationId)), [orders]);
+  const [ordersFromQuotation, setOrdersFromQuotation] = useState<OrderFromQuotation[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [cancellingOrder, setCancellingOrder] = useState<OrderFromQuotation | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusTab, setStatusTab] = useState<BookingStatus | 'all'>('all');
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatus | 'All'>('All');
+  const [statusTab, setStatusTab] = useState<OrderStatus | 'ALL'>('ALL');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<OrderPaymentStatus | 'ALL'>('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const [isPickQuotationOpen, setIsPickQuotationOpen] = useState(false);
-  const [pickedQuotation, setPickedQuotation] = useState<AdminQuotationRow | null>(null);
-  const [cancellingOrder, setCancellingOrder] = useState<AdminOrderRow | null>(null);
+  const load = () => {
+    setIsLoading(true);
+    setLoadError(null);
+    orderApiService
+      .getOrders({ limit: 100 })
+      .then(async (res) => {
+        const list: Order[] = res.data ?? [];
+        // N+1 tạm thời — xem giải thích đầu file. Danh sách hiện chỉ có vài chục đơn nên chấp nhận được.
+        const details = await Promise.all(list.map((o) => orderApiService.getOrder(o.orderId).catch(() => null)));
+        const withQuotation = details
+          .map((d) => d?.data as (Order & { quotationId?: string | null }) | undefined)
+          .filter((d): d is Order & { quotationId: string } => Boolean(d?.quotationId));
+        setOrdersFromQuotation(withQuotation);
+      })
+      .catch(() => setLoadError('Không tải được danh sách đơn từ báo giá. Vui lòng thử lại.'))
+      .finally(() => setIsLoading(false));
+  };
 
-  const refreshOrders = useCallback(() => setOrders(getAdminOrders()), []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const tabCounts: Record<BookingStatus | 'all', number> = {
-    all: ordersFromQuotation.length,
-    NEW: ordersFromQuotation.filter((o) => o.status === 'NEW').length,
-    CONFIRMED: ordersFromQuotation.filter((o) => o.status === 'CONFIRMED').length,
-    IN_PROGRESS: ordersFromQuotation.filter((o) => o.status === 'IN_PROGRESS').length,
-    COMPLETED: ordersFromQuotation.filter((o) => o.status === 'COMPLETED').length,
-    CANCELLED: ordersFromQuotation.filter((o) => o.status === 'CANCELLED').length,
+  const tabCounts: Record<OrderStatus | 'ALL', number> = {
+    ALL: ordersFromQuotation.length,
+    NEW: ordersFromQuotation.filter((o) => o.orderStatus === 'NEW').length,
+    CONFIRMED: ordersFromQuotation.filter((o) => o.orderStatus === 'CONFIRMED').length,
+    IN_PROGRESS: ordersFromQuotation.filter((o) => o.orderStatus === 'IN_PROGRESS').length,
+    COMPLETED: ordersFromQuotation.filter((o) => o.orderStatus === 'COMPLETED').length,
+    CANCELLED: ordersFromQuotation.filter((o) => o.orderStatus === 'CANCELLED').length,
   };
 
   const kpis = useMemo(() => {
-    const active = ordersFromQuotation.filter((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED').length;
-    const completed = ordersFromQuotation.filter((o) => o.status === 'COMPLETED').length;
-    const totalValue = ordersFromQuotation.reduce((sum, o) => sum + o.totalPrice, 0);
+    const active = ordersFromQuotation.filter((o) => o.orderStatus !== 'CANCELLED' && o.orderStatus !== 'COMPLETED').length;
+    const completed = ordersFromQuotation.filter((o) => o.orderStatus === 'COMPLETED').length;
+    const totalValue = ordersFromQuotation.reduce((sum, o) => sum + o.totalAmount, 0);
     return { active, completed, totalValue };
   }, [ordersFromQuotation]);
 
@@ -98,16 +125,15 @@ export default function AdminContractsPage() {
   const filteredOrders = useMemo(() => {
     const term = search.trim().toLowerCase();
     return ordersFromQuotation.filter((o) => {
-      if (statusTab !== 'all' && o.status !== statusTab) return false;
-      if (paymentStatusFilter !== 'All' && o.paymentStatus !== paymentStatusFilter) return false;
-      if (startDate && o.weddingDate < startDate) return false;
-      if (endDate && o.weddingDate > endDate) return false;
+      if (statusTab !== 'ALL' && o.orderStatus !== statusTab) return false;
+      if (paymentStatusFilter !== 'ALL' && o.paymentStatus !== paymentStatusFilter) return false;
+      if (startDate && o.eventDate < startDate) return false;
+      if (endDate && o.eventDate > endDate) return false;
       if (!term) return true;
       return (
-        o.orderId.toLowerCase().includes(term) ||
+        o.orderCode.toLowerCase().includes(term) ||
         o.customerName.toLowerCase().includes(term) ||
-        o.venue.toLowerCase().includes(term) ||
-        o.coordinatorName.toLowerCase().includes(term)
+        (o.eventName ?? '').toLowerCase().includes(term)
       );
     });
   }, [ordersFromQuotation, search, statusTab, paymentStatusFilter, startDate, endDate]);
@@ -119,36 +145,31 @@ export default function AdminContractsPage() {
 
   const handleResetFilters = () => {
     setSearchInput('');
-    setStatusTab('all');
-    setPaymentStatusFilter('All');
+    setStatusTab('ALL');
+    setPaymentStatusFilter('ALL');
     setStartDate('');
     setEndDate('');
   };
 
-  const handleQuotationPicked = (quotation: AdminQuotationRow) => {
-    setIsPickQuotationOpen(false);
-    setPickedQuotation(quotation);
-  };
-
-  const handleOrderSaved = () => {
-    setPickedQuotation(null);
-    refreshOrders();
-  };
-
-  const handleCancelConfirm = () => {
+  const handleCancelConfirm = async () => {
     if (!cancellingOrder) return;
-    updateAdminOrder(cancellingOrder.orderId, { status: 'CANCELLED' });
-    refreshOrders();
-    setCancellingOrder(null);
+    setIsCancelling(true);
+    try {
+      await orderApiService.updateOrderStatus(cancellingOrder.orderId, { orderStatus: 'CANCELLED' });
+      setCancellingOrder(null);
+      load();
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
-  const columns: TableColumn<AdminOrderRow>[] = [
+  const columns: TableColumn<OrderFromQuotation>[] = [
     {
-      key: 'orderId',
+      key: 'orderCode',
       label: 'Mã đơn',
       render: (row) => (
         <Link href={`/admin/orders_audit/${row.orderId}`} className="font-mono text-sm font-semibold text-blue-600 hover:underline">
-          {row.orderId}
+          {row.orderCode}
         </Link>
       ),
     },
@@ -166,47 +187,33 @@ export default function AdminContractsPage() {
       ),
     },
     {
-      key: 'packageType',
-      label: 'Gói & Ngày tổ chức',
+      key: 'eventName',
+      label: 'Sự kiện & Ngày tổ chức',
       className: 'max-w-[180px]',
       render: (row) => (
         <div>
-          <p className="line-clamp-1 font-medium text-slate-700">{row.packageType}</p>
-          <p className="text-xs text-slate-400">{formatDate(row.weddingDate)}</p>
+          <p className="line-clamp-1 font-medium text-slate-700">{row.eventName || row.eventType}</p>
+          <p className="text-xs text-slate-400">{formatDate(row.eventDate)}</p>
         </div>
       ),
     },
     {
-      key: 'totalPrice',
+      key: 'totalAmount',
       label: 'Giá trị',
       className: 'text-right font-bold text-slate-900',
-      render: (row) => formatCurrency(row.totalPrice),
+      render: (row) => formatCurrency(row.totalAmount),
     },
     {
-      key: 'quotationId',
-      label: 'Báo giá gốc',
-      render: (row) => {
-        const quotation = row.quotationId ? getAdminQuotationById(row.quotationId) : undefined;
-        return quotation ? (
-          <Link href={`/admin/quotations/${quotation.quotationId}`} className="font-mono text-xs font-semibold text-blue-600 hover:underline">
-            {quotation.code}
-          </Link>
-        ) : (
-          <span className="text-xs italic text-slate-300">—</span>
-        );
-      },
-    },
-    {
-      key: 'status',
+      key: 'orderStatus',
       label: 'Trạng thái đơn',
       className: 'text-center',
-      render: (row) => <Badge variant={BOOKING_STATUS_META[row.status].variant}>{BOOKING_STATUS_META[row.status].label}</Badge>,
+      render: (row) => <Badge variant={getStatusBadgeVariant(row.orderStatus)}>{ORDER_STATUS_LABEL[row.orderStatus]}</Badge>,
     },
     {
       key: 'paymentStatus',
       label: 'Thanh toán',
       className: 'text-center',
-      render: (row) => <Badge variant={PAYMENT_STATUS_META[row.paymentStatus].variant}>{PAYMENT_STATUS_META[row.paymentStatus].label}</Badge>,
+      render: (row) => <Badge variant={PAYMENT_BADGE_VARIANT[row.paymentStatus]}>{ORDER_PAYMENT_STATUS_LABEL[row.paymentStatus]}</Badge>,
     },
     {
       key: 'actions',
@@ -221,7 +228,7 @@ export default function AdminContractsPage() {
           >
             <Eye className="h-4 w-4" />
           </Link>
-          {row.status !== 'CANCELLED' && row.status !== 'COMPLETED' && (
+          {row.orderStatus !== 'CANCELLED' && row.orderStatus !== 'COMPLETED' && (
             <button
               type="button"
               onClick={() => setCancellingOrder(row)}
@@ -244,8 +251,7 @@ export default function AdminContractsPage() {
           <h1 className="text-2xl font-bold text-slate-900">Hợp đồng</h1>
           <p className="mt-1 text-sm text-slate-500">Danh sách đơn đặt hàng được tạo từ báo giá đã duyệt và dùng để vận hành sự kiện.</p>
         </div>
-        <Button onClick={() => setIsPickQuotationOpen(true)}>
-          <Plus className="h-4 w-4" />
+        <Button disabled title="Cần nối lại luồng chọn báo giá + tạo đơn theo API thật — xem docs/more-require.md mục (q)/(r)">
           Tạo đơn từ báo giá
         </Button>
       </div>
@@ -285,7 +291,7 @@ export default function AdminContractsPage() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Tìm theo mã đơn, khách hàng, sảnh..."
+              placeholder="Tìm theo mã đơn, khách hàng, sự kiện..."
               className="w-full rounded-md border border-slate-200 bg-slate-50/50 py-2 pl-8 pr-3 text-sm hover:bg-slate-50 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/10"
             />
           </div>
@@ -295,7 +301,7 @@ export default function AdminContractsPage() {
               <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400">Thanh toán:</span>
               <select
                 value={paymentStatusFilter}
-                onChange={(e) => setPaymentStatusFilter(e.target.value as PaymentStatus | 'All')}
+                onChange={(e) => setPaymentStatusFilter(e.target.value as OrderPaymentStatus | 'ALL')}
                 className="rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-2.5 pr-8 text-xs hover:bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {PAYMENT_STATUS_FILTER_OPTIONS.map((opt) => (
@@ -338,38 +344,29 @@ export default function AdminContractsPage() {
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          <Table columns={columns} rows={pageRows} rowKey={(row) => row.orderId} />
+          {isLoading ? (
+            <p className="py-10 text-center text-sm text-slate-400">Đang tải danh sách...</p>
+          ) : loadError ? (
+            <p className="py-10 text-center text-sm text-red-500">{loadError}</p>
+          ) : (
+            <Table columns={columns} rows={pageRows} rowKey={(row) => row.orderId} />
+          )}
         </div>
 
         <Pagination pagination={paginationState} onPageChange={setPage} />
       </motion.div>
 
-      <CreateOrderPickQuotationModal
-        isOpen={isPickQuotationOpen}
-        onClose={() => setIsPickQuotationOpen(false)}
-        onPicked={handleQuotationPicked}
-      />
-
-      {pickedQuotation && (
-        <CreateOrderFromQuotationModal
-          isOpen={Boolean(pickedQuotation)}
-          onClose={() => setPickedQuotation(null)}
-          quotation={pickedQuotation}
-          onSaved={handleOrderSaved}
-        />
-      )}
-
       <Modal
         isOpen={Boolean(cancellingOrder)}
         onClose={() => setCancellingOrder(null)}
         title="Hủy đơn đặt"
-        subtitle={cancellingOrder ? `Bạn có chắc muốn hủy đơn "${cancellingOrder.orderId}"? Đơn sẽ chuyển sang trạng thái Đã hủy, dữ liệu vẫn được giữ lại để đối chiếu.` : undefined}
+        subtitle={cancellingOrder ? `Bạn có chắc muốn hủy đơn "${cancellingOrder.orderCode}"? Đơn sẽ chuyển sang trạng thái Đã hủy, dữ liệu vẫn được giữ lại để đối chiếu.` : undefined}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setCancellingOrder(null)}>
+            <Button variant="secondary" onClick={() => setCancellingOrder(null)} disabled={isCancelling}>
               Đóng
             </Button>
-            <Button variant="danger" onClick={handleCancelConfirm}>
+            <Button variant="danger" onClick={handleCancelConfirm} isLoading={isCancelling}>
               Hủy đơn
             </Button>
           </>

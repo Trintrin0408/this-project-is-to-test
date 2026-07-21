@@ -3,17 +3,26 @@
 import { motion } from 'framer-motion';
 import { Activity as ActivityIcon, Calendar, Edit, MapPin, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { formatDate } from '@/utils/formatDate';
-import { SchedulePlan, TASK_STATUS_META, getPlanStatusInfo } from '@/mocks/db/schedulePlans';
+import { formatDate, formatTime } from '@/utils/formatDate';
+import type { OrderPlanGroup } from '@/utils/schedulePlanGroups';
+import { ROLE_LABEL, SCHEDULE_STATUS_BADGE, SCHEDULE_STATUS_LABEL, getGroupStatusInfo, unionAssignees } from '@/utils/schedulePlanGroups';
 
 interface PlanDetailDrawerProps {
-  plan: SchedulePlan;
+  group: OrderPlanGroup;
   onClose: () => void;
-  onEdit: (plan: SchedulePlan) => void;
+  onEdit: (group: OrderPlanGroup) => void;
 }
 
-export default function PlanDetailDrawer({ plan, onClose, onEdit }: Readonly<PlanDetailDrawerProps>) {
-  const statusInfo = getPlanStatusInfo(plan);
+// Kết nối backend thật (2026-07-21, GET /schedule-plans?orderId=) — xem docs/chitietkehoach_api.md.
+// Theo quyết định đã chốt ở mục 6 tài liệu đó: gộp "Các hoạt động chính" + "Danh sách công việc &
+// phân công" (mock cũ tách 2 mảng activities[]/tasks[]) thành 1 danh sách duy nhất, vì DB thật không
+// phân biệt 2 khái niệm này — mỗi phần tử là 1 dòng schedule_plans thật.
+export default function PlanDetailDrawer({ group, onClose, onEdit }: Readonly<PlanDetailDrawerProps>) {
+  const statusInfo = getGroupStatusInfo(group.rows);
+  const staff = unionAssignees(group.rows);
+  // "Ghi chú" cấp nhóm — quyết định đã chốt ở docs/chitietkehoach_api.md mục 6.2: lấy notes của dòng
+  // có start_time sớm nhất trong nhóm (schedule_plans.notes là cột per-row, không có "notes cấp nhóm").
+  const earliestNotes = [...group.rows].sort((a, b) => a.startTime.localeCompare(b.startTime))[0]?.notes;
 
   return (
     <>
@@ -31,7 +40,7 @@ export default function PlanDetailDrawer({ plan, onClose, onEdit }: Readonly<Pla
               <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Chi tiết kế hoạch vận hành</span>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${statusInfo.badgeClass}`}>{statusInfo.label}</span>
             </div>
-            <h3 className="mt-1 text-base font-bold text-slate-900">{plan.id}</h3>
+            <h3 className="mt-1 text-base font-bold text-slate-900">{group.orderCode}</h3>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-400 transition-all hover:bg-slate-200/50 hover:text-slate-600">
             <X className="h-5 w-5" />
@@ -41,92 +50,84 @@ export default function PlanDetailDrawer({ plan, onClose, onEdit }: Readonly<Pla
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
           <div className="space-y-3 rounded-xl border border-slate-150 bg-slate-50/70 p-4">
             <div className="flex items-center justify-between">
-              <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-white">{plan.orderId}</span>
-              <span className="text-[11px] font-medium text-slate-500">Người lập: {plan.manager}</span>
+              <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-[10px] font-bold text-white">{group.orderCode}</span>
+              <span className="text-[11px] italic text-slate-400" title="Chưa có API: GET /schedule-plans chưa join sẵn orders.created_by cho màn đa đơn — xem docs/more-require.md">
+                Người lập: chưa có API
+              </span>
             </div>
-            <h4 className="text-sm font-bold text-slate-900">{plan.eventName}</h4>
+            <h4 className="text-sm font-bold text-slate-900">{group.eventName}</h4>
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
               <p className="flex items-center gap-1">
                 <Calendar className="h-4 w-4 text-slate-400" />
-                {formatDate(plan.eventDate)}
+                {formatDate(group.eventDate)}
               </p>
               <p className="flex items-center gap-1">
                 <MapPin className="h-4 w-4 text-slate-400" />
-                {plan.location}
+                {group.location}
               </p>
             </div>
-            {plan.notes && <p className="rounded-lg bg-white p-2.5 text-xs italic text-slate-500">{plan.notes}</p>}
+            {earliestNotes && <p className="rounded-lg bg-white p-2.5 text-xs italic text-slate-500">{earliestNotes}</p>}
           </div>
 
           <div className="space-y-3">
-            <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">Các hoạt động chính</h4>
+            <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">
+              Các hoạt động & công việc ({group.rows.length})
+            </h4>
             <div className="space-y-2">
-              {plan.activities.map((act) => (
-                <div key={act.id} className="flex items-start gap-3 rounded-xl border border-slate-150 bg-white p-3">
+              {group.rows.map((row) => (
+                <div key={row.planId} className="flex items-start gap-3 rounded-xl border border-slate-150 bg-white p-3">
                   <div className="rounded-lg bg-slate-50 p-2 text-slate-600">
                     <ActivityIcon className="h-4 w-4 text-blue-500" />
                   </div>
-                  <div className="flex-1 space-y-1 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-800">{act.type}</span>
-                      <span className="font-mono text-[10px] text-slate-500">
-                        {act.startTime} - {act.endTime}
+                  <div className="flex-1 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-800">{row.taskName ?? row.taskId}</span>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${SCHEDULE_STATUS_BADGE[row.status]}`}>
+                        {SCHEDULE_STATUS_LABEL[row.status]}
                       </span>
                     </div>
-                    <p className="leading-relaxed text-slate-500">{act.notes}</p>
-                    <p className="flex items-center gap-1 text-[10px] text-slate-400">
-                      <MapPin className="h-3.5 w-3.5" />
-                      {act.location}
-                    </p>
+                    <span className="font-mono text-[10px] text-slate-500">
+                      {formatTime(row.startTime)}
+                      {row.endTime ? ` - ${formatTime(row.endTime)}` : ''}
+                      {` · ${formatDate(row.startTime)}`}
+                    </span>
+                    {row.notes && <p className="leading-relaxed text-slate-500">{row.notes}</p>}
+                    {row.location && (
+                      <p className="flex items-center gap-1 text-[10px] text-slate-400">
+                        <MapPin className="h-3.5 w-3.5" />
+                        {row.location}
+                      </p>
+                    )}
+                    {(row.assignees?.length ?? 0) > 0 && (
+                      <p className="text-[10px] text-slate-500">
+                        Phụ trách:{' '}
+                        <strong className="text-slate-700">
+                          {row.assignees!.map((a) => `${a.fullName} (${ROLE_LABEL[a.role]})`).join(', ')}
+                        </strong>
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
+              {group.rows.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/40 p-4 text-center italic text-slate-400">
+                  Chưa có hoạt động/công việc nào được lập cho đơn này.
+                </div>
+              )}
             </div>
           </div>
 
           <div className="space-y-3">
             <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">
-              Danh sách công việc & phân công ({plan.tasks.length})
-            </h4>
-            {plan.tasks.length > 0 ? (
-              <div className="space-y-3">
-                {plan.tasks.map((task) => (
-                  <div key={task.id} className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="line-clamp-1 text-xs font-bold text-slate-800">{task.title}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${TASK_STATUS_META[task.status].badgeClass}`}>
-                        {TASK_STATUS_META[task.status].label}
-                      </span>
-                    </div>
-                    <p className="line-clamp-2 text-xs leading-relaxed text-slate-500">{task.requirements}</p>
-                    <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[11px] text-slate-500">
-                      <span>
-                        Phụ trách: <strong className="text-slate-800">{task.assignee}</strong>
-                      </span>
-                      <span>
-                        Đồng hành: <strong className="text-slate-800">{task.team.join(', ') || 'Không có'}</strong>
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/40 p-4 text-center italic text-slate-400">
-                Chưa có công việc nào được phân công trong kế hoạch này.
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="border-l-2 border-blue-500 pl-2 text-xs font-bold uppercase tracking-wider text-slate-900">
-              Nhân sự tham gia ({plan.staffList.length})
+              Nhân sự tham gia ({staff.length})
             </h4>
             <div className="flex flex-wrap gap-2">
-              {plan.staffList.map((s) => (
-                <span key={s.name} className="rounded-lg border border-slate-150 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700">
-                  {s.name} <span className="font-normal text-slate-400">— {s.role}</span>
+              {staff.map((s) => (
+                <span key={s.userId} className="rounded-lg border border-slate-150 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700">
+                  {s.fullName} <span className="font-normal text-slate-400">— {ROLE_LABEL[s.role]}</span>
                 </span>
               ))}
+              {staff.length === 0 && <span className="text-xs italic text-slate-400">Chưa có nhân sự nào được gán.</span>}
             </div>
           </div>
         </div>
@@ -137,7 +138,7 @@ export default function PlanDetailDrawer({ plan, onClose, onEdit }: Readonly<Pla
           </Button>
           <Button
             onClick={() => {
-              onEdit(plan);
+              onEdit(group);
               onClose();
             }}
           >

@@ -54,7 +54,84 @@ export interface SaveQuotationPayload {
   items: { itemId: string; quantity: number; price: number; discount?: number }[]; // tối thiểu 1
 }
 
-// PATCH /api/v1/quotations/:id/status
+// PATCH /api/v1/quotations/:id/status — xác nhận qua curl thật 2026-07-20: backend chỉ nhận lowercase
+// và chỉ 2 giá trị này (không thể PATCH ngược về "draft" — trạng thái khởi tạo, chỉ đi tới APPROVED/
+// REJECTED). Khai báo cũ (QuotationStatus, uppercase, có cả 'DRAFT') sai cả kiểu chữ và tập giá trị.
 export interface UpdateQuotationStatusPayload {
-  status: QuotationStatus;
+  status: 'approved' | 'rejected';
+}
+
+// GET /api/v1/quotations — màn danh sách báo giá xuyên mọi khách hàng (docs/danhsachbaogia_api.md mục 4.1)
+export type QuotationListStatus = 'draft' | 'approved' | 'rejected';
+
+export interface QuotationListItem {
+  quotationId: string;
+  code: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  version: string;
+  subtotal: number;
+  discount: number;
+  totalAmount: number;
+  status: QuotationListStatus;
+  createdAt: string;
+}
+
+export interface QuotationListMeta {
+  page: number;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
+  counts: {
+    all: number;
+    draft: number;
+    approved: number;
+    rejected: number;
+    approvedValue: number;
+  };
+}
+
+export interface GetQuotationsQuery {
+  search?: string;
+  status?: QuotationListStatus;
+  customerId?: string;
+  page?: number;
+  limit?: number;
+}
+
+// GET /api/v1/quotations/:id — xác nhận qua curl thật 2026-07-20: response ĐÃ trả đúng shape mở rộng
+// (JOIN customerEmail/customerAddress, createdBy object, linkedOrderId, items[].categoryName/unit) mà
+// docs/xemchitietbaogia_api.md mục 5.1 đề xuất — không phải đề xuất chờ Backend làm, đã có sẵn thật.
+export interface QuotationDetailItem {
+  quotationItemId: string;
+  itemId: string;
+  itemName: string;
+  categoryName: string;
+  unit: string;
+  quantity: number;
+  price: number;
+  discount: number;
+  lineTotal: number;
+}
+
+export interface QuotationDetailApi {
+  quotationId: string;
+  quotationCode: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  customerAddress: string | null;
+  version: string;
+  subtotal: number;
+  discountTotal: number;
+  totalAmount: number;
+  status: QuotationListStatus;
+  notes: string | null;
+  createdBy: { userId: string; fullName: string; role: string };
+  createdAt: string;
+  updatedAt: string;
+  linkedOrderId: string | null;
+  items: QuotationDetailItem[];
 }

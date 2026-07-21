@@ -1,7 +1,13 @@
 import api from './api';
-import type { SaveQuotationPayload, UpdateQuotationStatusPayload } from '@/types/quotation';
+import type { GetQuotationsQuery, SaveQuotationPayload, UpdateQuotationStatusPayload } from '@/types/quotation';
 
 export const quotationApiService = {
+  /** GET /api/v1/quotations — danh sách báo giá xuyên mọi khách hàng, dùng cho màn "Danh sách báo giá" */
+  async getQuotations(params?: GetQuotationsQuery) {
+    const response = await api.get('/quotations', { params });
+    return response.data;
+  },
+
   /** GET /api/v1/customers/{customerId}/quotations */
   async getCustomerQuotations(customerId: string, params?: { page?: number; limit?: number }) {
     const response = await api.get(`/customers/${customerId}/quotations`, { params });

@@ -1,87 +1,139 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, Clock, Compass, Eye, FileText, MapPin, Plus, Search, User } from 'lucide-react';
-import { Badge } from '@/components/ui/Badge';
+import { CheckCircle2, Clock, Compass, Eye, FileText, MapPin, Search, User } from 'lucide-react';
+import { Badge, type BadgeVariant } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
 import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
+import { formatDate } from '@/utils/formatDate';
 import SurveyDetailDrawer from '@/components/survey-reports/SurveyDetailDrawer';
-import SurveyCreateDrawer from '@/components/survey-reports/SurveyCreateDrawer';
-import {
-  AdminSurveyReport,
-  SURVEY_REPORT_STATUS_META,
-  SurveyReportStatus,
-  addAdminSurveyReport,
-  getAdminSurveyReports,
-  updateAdminSurveyReport,
-} from '@/mocks/db';
+import { surveyApiService } from '@/services/survey.service';
+import type { SurveyReport, SurveyReportListItem, SurveyReportListMeta, SurveyStatus } from '@/types/survey';
 
-// Trang thuần giao diện — xem giải thích ở đầu src/mocks/db/surveyReports.ts. Mirror 1:1 của
-// src/app/admin/reports/survey/page.tsx cho Manager (cùng dữ liệu mock, cùng component dùng chung),
-// chỉ khác đường dẫn route (/manager/survey thay vì /admin/reports/survey). Bố cục dạng drawer trượt
-// từ phải theo đúng mẫu docs/components/SurveySection.tsx — không có trang chi tiết riêng.
+// Nối API thật theo docs/khaosathientruong_api.md (2026-07-20, mọi quyết định đã chốt — mục 8) —
+// mirror 1:1 với src/app/admin/reports/survey/page.tsx. GET /api/v1/survey-reports (danh sách toàn
+// cục, MỚI — trước đây chỉ có bản theo 1 đơn) đã join sẵn orderCode/customerName/eventName/
+// reportedByName + meta.counts đúng 4 giá trị enum thật, dùng thẳng cho 4 thẻ KPI + tab lọc.
+// Đã BỎ nút "+ Tạo báo cáo khảo sát" (và SurveyCreateDrawer) — theo mục 0, đây là hành động của
+// Leader Staff qua mobile (POST /survey-reports giữ nguyên, chỉ đổi phía gọi), không phải Manager
+// trên web. `PENDING_CONFIRM` (mock) = `NEEDS_REVIEW` (thật, theo mục 2) — `SUBMITTED` tạm gộp hiển
+// thị cùng nhóm "Chờ xác nhận" tới khi Backend làm rõ thêm sự khác biệt.
 
-const STATUS_TABS: { value: SurveyReportStatus | 'ALL'; label: string }[] = [
+const STATUS_TABS: { value: SurveyStatus | 'ALL'; label: string }[] = [
   { value: 'ALL', label: 'Tất cả' },
-  { value: 'PENDING_CONFIRM', label: 'Chờ xác nhận' },
+  { value: 'NEEDS_REVIEW', label: 'Chờ xác nhận' },
   { value: 'CONFIRMED', label: 'Đã xác nhận' },
+  { value: 'DRAFT', label: 'Bản nháp' },
 ];
 
+const SURVEY_STATUS_META: Record<SurveyStatus, { label: string; variant: BadgeVariant }> = {
+  DRAFT: { label: 'Bản nháp', variant: 'neutral' },
+  NEEDS_REVIEW: { label: 'Chờ xác nhận', variant: 'warning' },
+  SUBMITTED: { label: 'Chờ xác nhận', variant: 'warning' },
+  CONFIRMED: { label: 'Đã xác nhận', variant: 'success' },
+};
+
+const emptyMeta: SurveyReportListMeta = {
+  page: 1,
+  limit: 10,
+  totalItems: 0,
+  totalPages: 1,
+  counts: { all: 0, draft: 0, needsReview: 0, submitted: 0, confirmed: 0 },
+};
+
 export default function ManagerSurveyReportsPage() {
-  const [reports, setReports] = useState<AdminSurveyReport[]>(() => getAdminSurveyReports());
+  const [reports, setReports] = useState<SurveyReportListItem[]>([]);
+  const [meta, setMeta] = useState<SurveyReportListMeta>(emptyMeta);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusFilter, setStatusFilter] = useState<SurveyReportStatus | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<SurveyStatus | 'ALL'>('ALL');
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const [selectedReport, setSelectedReport] = useState<AdminSurveyReport | null>(null);
+  const [selectedReport, setSelectedReport] = useState<SurveyReport | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
 
-  const countPending = reports.filter((r) => r.status === 'PENDING_CONFIRM').length;
-  const countConfirmed = reports.filter((r) => r.status === 'CONFIRMED').length;
-  const countDraft = reports.filter((r) => r.status === 'DRAFT').length;
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter]);
 
-  const filteredReports = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return reports.filter((r) => {
-      if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
-      if (!term) return true;
-      return (
-        r.id.toLowerCase().includes(term) ||
-        r.orderId.toLowerCase().includes(term) ||
-        r.customerName.toLowerCase().includes(term) ||
-        r.location.toLowerCase().includes(term)
-      );
-    });
-  }, [reports, search, statusFilter]);
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setLoadError(null);
+    surveyApiService
+      .getSurveyReports({
+        page,
+        limit,
+        search: search.trim() || undefined,
+        status: statusFilter !== 'ALL' ? statusFilter : undefined,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setReports(res.data ?? []);
+        setMeta(res.meta ?? emptyMeta);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setReports([]);
+        setLoadError('Không tải được danh sách báo cáo khảo sát. Vui lòng thử lại.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, search, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredReports.length / limit));
-  const safePage = Math.min(page, totalPages);
-  const pageRows = filteredReports.slice((safePage - 1) * limit, safePage * limit);
-  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredReports.length, limit };
+  const paginationState: PaginationState = {
+    currentPage: meta.page,
+    totalPages: Math.max(1, meta.totalPages),
+    totalItems: meta.totalItems,
+    limit: meta.limit,
+  };
 
-  const handleCreateSubmit = (report: AdminSurveyReport) => {
-    addAdminSurveyReport(report);
-    setReports(getAdminSurveyReports());
-    setIsCreateOpen(false);
+  const handleOpenDetail = (surveyId: string) => {
+    setIsDetailLoading(true);
+    surveyApiService
+      .getSurveyReportById(surveyId)
+      .then((res) => setSelectedReport(res.data ?? null))
+      .catch(() => setSelectedReport(null))
+      .finally(() => setIsDetailLoading(false));
   };
 
   const handleConfirm = (id: string) => {
     setConfirmingId(id);
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     if (!confirmingId) return;
-    updateAdminSurveyReport(confirmingId, { status: 'CONFIRMED' });
-    setReports(getAdminSurveyReports());
-    setSelectedReport((prev) => (prev && prev.id === confirmingId ? { ...prev, status: 'CONFIRMED' } : prev));
-    setConfirmingId(null);
+    setIsConfirming(true);
+    try {
+      await surveyApiService.confirmSurveyReport(confirmingId, { status: 'CONFIRMED' });
+      setSelectedReport((prev) => (prev && prev.surveyId === confirmingId ? { ...prev, status: 'CONFIRMED' } : prev));
+      setConfirmingId(null);
+      setPage(1);
+      const res = await surveyApiService.getSurveyReports({
+        page: 1,
+        limit,
+        search: search.trim() || undefined,
+        status: statusFilter !== 'ALL' ? statusFilter : undefined,
+      });
+      setReports(res.data ?? []);
+      setMeta(res.meta ?? emptyMeta);
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   return (
@@ -89,12 +141,8 @@ export default function ManagerSurveyReportsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Khảo sát hiện trường</h1>
-          <p className="mt-1 text-sm text-slate-500">Quản lý báo cáo khảo sát hiện trường phục vụ lập kế hoạch & báo giá.</p>
+          <p className="mt-1 text-sm text-slate-500">Xem lại báo cáo khảo sát hiện trường do Leader Staff ghi nhận và xác nhận trước khi lập kế hoạch & báo giá.</p>
         </div>
-        <Button onClick={() => setIsCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Tạo báo cáo khảo sát
-        </Button>
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -107,7 +155,7 @@ export default function ManagerSurveyReportsPage() {
         >
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Tổng số báo cáo</p>
-            <p className="mt-1 text-xl font-bold text-slate-900">{reports.length}</p>
+            <p className="mt-1 text-xl font-bold text-slate-900">{meta.counts.all}</p>
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-50 text-slate-500">
             <Compass className="h-5 w-5" />
@@ -122,7 +170,7 @@ export default function ManagerSurveyReportsPage() {
         >
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500">Chờ xác nhận</p>
-            <p className="mt-1 text-xl font-bold text-amber-700">{countPending}</p>
+            <p className="mt-1 text-xl font-bold text-amber-700">{meta.counts.needsReview + meta.counts.submitted}</p>
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
             <Clock className="h-5 w-5" />
@@ -137,7 +185,7 @@ export default function ManagerSurveyReportsPage() {
         >
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">Đã xác nhận</p>
-            <p className="mt-1 text-xl font-bold text-emerald-700">{countConfirmed}</p>
+            <p className="mt-1 text-xl font-bold text-emerald-700">{meta.counts.confirmed}</p>
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
             <CheckCircle2 className="h-5 w-5" />
@@ -152,7 +200,7 @@ export default function ManagerSurveyReportsPage() {
         >
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bản nháp/Khác</p>
-            <p className="mt-1 text-xl font-bold text-slate-600">{countDraft}</p>
+            <p className="mt-1 text-xl font-bold text-slate-600">{meta.counts.draft}</p>
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
             <FileText className="h-5 w-5" />
@@ -209,35 +257,48 @@ export default function ManagerSurveyReportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {pageRows.length > 0 ? (
-                pageRows.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50/60">
-                    <td className="px-4 py-3 font-mono font-semibold text-slate-900">{r.id}</td>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={8} className="py-10 text-center text-slate-400">
+                    Đang tải danh sách báo cáo khảo sát...
+                  </td>
+                </tr>
+              ) : loadError ? (
+                <tr>
+                  <td colSpan={8} className="py-10 text-center text-red-500">
+                    {loadError}
+                  </td>
+                </tr>
+              ) : reports.length > 0 ? (
+                reports.map((r) => (
+                  <tr key={r.surveyId} className="hover:bg-slate-50/60">
+                    <td className="px-4 py-3 font-mono font-semibold text-slate-900">{r.reportCode}</td>
                     <td className="px-4 py-3">
-                      <span className="rounded bg-slate-100 px-2 py-1 font-mono font-medium text-slate-800">{r.orderId}</span>
+                      <span className="rounded bg-slate-100 px-2 py-1 font-mono font-medium text-slate-800">{r.orderCode}</span>
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-semibold text-slate-900">{r.customerName}</p>
-                      <p className="mt-0.5 text-xs text-slate-400">{r.eventName}</p>
+                      <p className="mt-0.5 text-xs text-slate-400">{r.eventName || '—'}</p>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-500">{r.surveyDate}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-500">{formatDate(r.surveyDate)}</td>
                     <td className="max-w-xs truncate px-4 py-3 text-slate-600" title={r.location}>
                       {r.location}
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
                         <User className="h-3.5 w-3.5 text-slate-400" />
-                        {r.assignee}
+                        {r.reportedByName || '—'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge variant={SURVEY_REPORT_STATUS_META[r.status].variant}>{SURVEY_REPORT_STATUS_META[r.status].label}</Badge>
+                      <Badge variant={SURVEY_STATUS_META[r.status].variant}>{SURVEY_STATUS_META[r.status].label}</Badge>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
-                        onClick={() => setSelectedReport(r)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 font-medium text-slate-700 hover:border-blue-300 hover:bg-slate-50"
+                        onClick={() => handleOpenDetail(r.surveyId)}
+                        disabled={isDetailLoading}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 font-medium text-slate-700 hover:border-blue-300 hover:bg-slate-50 disabled:opacity-50"
                       >
                         <Eye className="h-3.5 w-3.5" />
                         Xem chi tiết
@@ -267,23 +328,21 @@ export default function ManagerSurveyReportsPage() {
         )}
       </AnimatePresence>
 
-      <SurveyCreateDrawer isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} onSubmit={handleCreateSubmit} />
-
       <Modal
         isOpen={Boolean(confirmingId)}
         onClose={() => setConfirmingId(null)}
         title="Xác nhận báo cáo khảo sát?"
         subtitle={
           confirmingId
-            ? `Bạn đang phê duyệt thông số khảo sát của báo cáo ${confirmingId}. Dữ liệu đo đạc này sẽ dùng làm căn cứ lập kế hoạch & báo giá.`
+            ? `Bạn đang phê duyệt thông số khảo sát của báo cáo. Dữ liệu đo đạc này sẽ dùng làm căn cứ lập kế hoạch & báo giá.`
             : undefined
         }
         footer={
           <>
-            <Button variant="secondary" onClick={() => setConfirmingId(null)}>
+            <Button variant="secondary" onClick={() => setConfirmingId(null)} disabled={isConfirming}>
               Hủy bỏ
             </Button>
-            <Button onClick={handleConfirmAction}>
+            <Button onClick={handleConfirmAction} isLoading={isConfirming}>
               <CheckCircle2 className="h-4 w-4" />
               Đồng ý phê duyệt
             </Button>

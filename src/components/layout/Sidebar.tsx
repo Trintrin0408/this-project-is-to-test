@@ -108,7 +108,7 @@ const MANAGER_NAV_SECTIONS: NavSection[] = [
           { label: 'Thanh toán', href: '/manager/payments/settlements', icon: Wallet },
         ],
       },
-      { label: 'Khảo sát', href: '/manager/survey', icon: MapPin },
+      { label: 'Báo cáo khảo sát', href: '/manager/survey', icon: MapPin },
       {
         label: 'Lịch trình',
         href: '/manager/schedule/plans',

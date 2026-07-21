@@ -161,7 +161,7 @@ export default function CreateQuotationModal({
         targetId = res.data?.quotationId;
       }
       if (thenApprove && targetId) {
-        await quotationApiService.updateQuotationStatus(targetId, { status: 'APPROVED' });
+        await quotationApiService.updateQuotationStatus(targetId, { status: 'approved' });
       }
       onSuccess();
       resetAndClose();

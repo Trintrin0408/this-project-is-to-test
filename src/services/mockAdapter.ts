@@ -33,11 +33,13 @@ import {
   confirmSettlement,
   getFieldChangeRequests,
   reviewFieldChangeRequest,
+  getAdminQuotations,
   type AdminCustomer,
   type AdminOrderRow,
   type MockApiMeta,
   type FieldChangeRequest,
 } from '@/mocks/db';
+import type { QuotationListItem, QuotationListStatus } from '@/types/quotation';
 import type { ItemCategory } from '@/types/catalog';
 import type { InventoryRow } from '@/types/inventory';
 import type { AuthProfile, AuthUser } from '@/types/auth';
@@ -78,6 +80,8 @@ function mapOrderToApi(o: AdminOrderRow): Order {
     orderId: o.orderId,
     orderCode: o.orderId,
     customerId: o.customerId,
+    customerName: o.customerName,
+    customerPhone: o.customerPhone,
     quotationId: o.quotationId,
     eventType: 'Đám cưới',
     eventName: `Lễ cưới ${o.customerName}`,
@@ -88,7 +92,7 @@ function mapOrderToApi(o: AdminOrderRow): Order {
     paymentStatus: o.paymentStatus as OrderPaymentStatus,
     orderStatus: o.status as OrderStatus,
     notes: o.notes,
-    createdBy: 'mock-manager-1',
+    createdBy: { userId: 'mock-manager-1', fullName: 'Trưởng phòng vận hành', role: 'MANAGER' },
     createdAt: FIXED_TIMESTAMP,
     updatedAt: FIXED_TIMESTAMP,
   };
@@ -494,6 +498,50 @@ function resolve(method: string, path: string, params: Record<string, unknown>, 
   }
 
   // ===== Quotations =====
+  // GET /quotations: theo docs/danhsachbaogia_api.md — Hướng A đã chốt (bỏ trạng thái 'surveying' khỏi
+  // màn danh sách, đây là trạng thái Order-đang-khảo-sát-chưa-có-báo-giá, không phải Quotation thật).
+  if (m === 'GET' && path === '/quotations') {
+    const realRows = getAdminQuotations().filter((r) => r.status !== 'surveying');
+    let mapped: QuotationListItem[] = realRows.map((r) => ({
+      quotationId: r.quotationId,
+      code: r.code,
+      customerId: r.customerId,
+      customerName: r.customerName,
+      customerPhone: r.customerPhone,
+      version: `v${r.version}`,
+      subtotal: r.subtotal,
+      discount: r.discount,
+      totalAmount: r.totalAmount,
+      status: r.status as QuotationListStatus,
+      createdAt: r.createdAt,
+    }));
+    const counts = {
+      all: mapped.length,
+      draft: mapped.filter((r) => r.status === 'draft').length,
+      approved: mapped.filter((r) => r.status === 'approved').length,
+      rejected: mapped.filter((r) => r.status === 'rejected').length,
+      approvedValue: mapped.filter((r) => r.status === 'approved').reduce((sum, r) => sum + r.totalAmount, 0),
+    };
+    if (params.status) mapped = mapped.filter((r) => r.status === params.status);
+    if (params.customerId) mapped = mapped.filter((r) => r.customerId === params.customerId);
+    if (params.search) {
+      const term = String(params.search).toLowerCase();
+      mapped = mapped.filter((r) => r.code.toLowerCase().includes(term) || r.customerName.toLowerCase().includes(term));
+    }
+    const page = (params.page as number) || 1;
+    const limit = (params.limit as number) || 10;
+    const { data } = paginate(mapped, page, limit);
+    return {
+      status: 200,
+      data: {
+        success: true,
+        code: 'MOCK-OK',
+        message: 'Thao tác thành công (dữ liệu mô phỏng)',
+        data,
+        meta: { page, limit, totalItems: mapped.length, totalPages: Math.max(1, Math.ceil(mapped.length / limit)), counts },
+      },
+    };
+  }
   {
     const quotationsParams = matchPath('/customers/:customerId/quotations', path);
     if (m === 'POST' && quotationsParams) {

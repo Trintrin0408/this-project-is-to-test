@@ -49,8 +49,10 @@ export default function CreateTaskModal({ isOpen, onClose, onCreated }: Readonly
     setStartTime('');
     setLocation('');
     setError(null);
-    orderApiService.getOrders({ limit: 200 }).then((res) => setOrders(res.data ?? []));
-    customerApiService.getCustomers({ limit: 200 }).then((res) => setCustomers(res.data ?? []));
+    // limit tối đa backend thật chấp nhận cho /orders và /customers là 100 (400 VALIDATION_ERROR nếu
+    // vượt quá).
+    orderApiService.getOrders({ limit: 100 }).then((res) => setOrders(res.data ?? []));
+    customerApiService.getCustomers({ limit: 100 }).then((res) => setCustomers(res.data ?? []));
     workTaskApiService.getWorkTasks({ isActive: true }).then((res) => setWorkTasks(res.data ?? []));
     userApiService
       .getUsers({ limit: 100 })

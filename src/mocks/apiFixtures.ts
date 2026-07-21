@@ -27,6 +27,12 @@ const NOW = '2026-07-10T00:00:00Z';
 const ALL_ORDERS = getAdminOrders();
 const ORDER_A_ID = (ALL_ORDERS[0]?.orderId ?? 'DD0001') as string;
 const ORDER_C_ID = (ALL_ORDERS[2]?.orderId ?? 'DD0003') as string;
+// Mock không có cột orderCode riêng — orderId chính là mã hiển thị (kiểu 'DD0001'). Dùng cho
+// MOCK_SURVEY_REPORTS bên dưới (SurveyReport thật yêu cầu kèm orderCode/customerName join sẵn).
+const ORDER_A_CODE = ORDER_A_ID;
+const ORDER_A_CUSTOMER_NAME = ALL_ORDERS[0]?.customerName ?? 'Khách hàng';
+const ORDER_C_CODE = ORDER_C_ID;
+const ORDER_C_CUSTOMER_NAME = ALL_ORDERS[2]?.customerName ?? 'Khách hàng';
 
 const ALL_SUPPLIERS = getAdminSuppliers();
 const SUPPLIER_1 = ALL_SUPPLIERS.find((s) => s.supplierId === 'sup-1') ?? ALL_SUPPLIERS[0];
@@ -69,6 +75,8 @@ export const MOCK_SURVEY_REPORTS: SurveyReport[] = [
     surveyId: 'survey-1',
     reportCode: 'KS-001',
     orderId: ORDER_A_ID,
+    orderCode: ORDER_A_CODE,
+    customerName: ORDER_A_CUSTOMER_NAME,
     planId: 'plan-1',
     surveyDate: '2026-07-20T08:30:00Z',
     location: 'Sảnh Hera, 12 Lê Lợi, Q1',
@@ -91,6 +99,8 @@ export const MOCK_SURVEY_REPORTS: SurveyReport[] = [
     surveyId: 'survey-2',
     reportCode: 'KS-002',
     orderId: ORDER_C_ID,
+    orderCode: ORDER_C_CODE,
+    customerName: ORDER_C_CUSTOMER_NAME,
     planId: 'plan-3',
     surveyDate: '2026-07-15T08:30:00Z',
     location: 'Sảnh Zeus, 78 CMT8, Q3',

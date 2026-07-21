@@ -1,8 +1,10 @@
 // docs/api/10-survey-assignment.md — ĐÃ LỖI THỜI sau đợt backend refactor 2026-07-06. Field thật
 // khác hẳn (không còn workTaskId/evidences[]/surveyedBy) — SurveyReport giờ có đầy đủ thông tin
 // khảo sát hiện trường (kích thước, lối vào, ràng buộc mặt bằng...) gắn trực tiếp vào Order.
-// GET /survey-reports/:id có include `evidence` (1 file duy nhất) nhưng KHÔNG join reporter/
-// confirmer — không có tên người khảo sát trong response dù reportedBy/confirmedBy đã lưu thật.
+// Cập nhật 2026-07-20 (theo docs/khaosathientruong_api.md mục 1/7): GET /survey-reports (list, MỚI —
+// trước đây chỉ có bản theo 1 đơn) và GET /survey-reports/:id đã join sẵn orderCode/customerName/
+// eventName/reportedByName/confirmedByName — khác nhận định cũ ("KHÔNG join reporter/confirmer") viết
+// trước khi Backend bổ sung.
 // Nguồn: D:\bnwems-backend-api prisma/schema.prisma (model SurveyReport), operations.route.ts.
 
 export type SurveyStatus = 'DRAFT' | 'NEEDS_REVIEW' | 'SUBMITTED' | 'CONFIRMED';
@@ -11,6 +13,9 @@ export interface SurveyReport {
   surveyId: string;
   reportCode: string;
   orderId: string;
+  orderCode: string;
+  customerName: string;
+  eventName?: string;
   planId?: string;
   evidenceId?: string;
   evidence?: { evidenceId: string; fileUrl: string };
@@ -26,10 +31,48 @@ export interface SurveyReport {
   notes?: string;
   status: SurveyStatus;
   reportedBy: string;
+  reportedByName?: string;
   confirmedBy?: string;
+  confirmedByName?: string;
   confirmedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// GET /api/v1/survey-reports — danh sách toàn cục, join sẵn orderCode/customerName/eventName/
+// reportedByName (không kèm field đo đạc chi tiết — chỉ có ở GET /survey-reports/:id).
+export interface SurveyReportListItem {
+  surveyId: string;
+  reportCode: string;
+  orderId: string;
+  orderCode: string;
+  customerName: string;
+  eventName?: string;
+  surveyDate: string;
+  location: string;
+  status: SurveyStatus;
+  reportedByName?: string;
+}
+
+export interface GetSurveyReportsQuery {
+  search?: string;
+  status?: SurveyStatus;
+  page?: number;
+  limit?: number;
+}
+
+export interface SurveyReportListMeta {
+  page: number;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
+  counts: {
+    all: number;
+    draft: number;
+    needsReview: number;
+    submitted: number;
+    confirmed: number;
+  };
 }
 
 // POST /api/v1/survey-reports

@@ -1,5 +1,6 @@
 import api from './api';
 import type {
+  AddScheduleAssigneePayload,
   CreateSchedulePlanPayload,
   GetSchedulePlansQuery,
   UpdateSchedulePlanPayload,
@@ -28,6 +29,12 @@ export const schedulePlanApiService = {
   /** PATCH /api/v1/schedule-plans/:id/status */
   async updateSchedulePlanStatus(planId: string, payload: UpdateSchedulePlanStatusPayload) {
     const response = await api.patch(`/schedule-plans/${planId}/status`, payload);
+    return response.data;
+  },
+
+  /** POST /api/v1/schedule-plans/:id/assignees — gán 1 người vào kế hoạch, trả lại full SchedulePlan */
+  async addAssignee(planId: string, payload: AddScheduleAssigneePayload) {
+    const response = await api.post(`/schedule-plans/${planId}/assignees`, payload);
     return response.data;
   },
 };

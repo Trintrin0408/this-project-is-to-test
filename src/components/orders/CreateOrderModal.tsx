@@ -14,6 +14,11 @@ import { formatCurrency } from '@/utils/formatCurrency';
 import type { Customer } from '@/types/customer';
 import type { Item } from '@/types/catalog';
 
+// Nối API thật theo docs/taodondatlichtiecmoi_api.md mục 3 (Hướng A) — wire vào nút "Khởi tạo đơn đặt
+// hàng" ở manager/orders/page.tsx và admin/orders_audit/page.tsx (2026-07-20). Component này đã đúng
+// shape `CreateOrderPayload` từ trước (customerId/eventType/eventDate ISO/location/guestCount/items[]),
+// chỉ còn thiếu ở lần nối trước là chưa được import ở đâu — không cần sửa logic tạo đơn.
+
 const EVENT_TYPE_OPTIONS = EVENT_TYPES.map((t) => ({ value: t, label: t }));
 
 interface OrderItemDraft {
@@ -57,7 +62,10 @@ export default function CreateOrderModal({ isOpen, customers, onClose, onCreated
 
   useEffect(() => {
     if (!isOpen) return;
-    catalogApiService.getItems({ limit: 200 }).then((res) => setItemList(res.data ?? []));
+    catalogApiService
+      .getItems({ limit: 200, status: 'ACTIVE' })
+      .then((res) => setItemList(res.data ?? []))
+      .catch(() => setItemList([]));
   }, [isOpen]);
 
   const itemById = useMemo(() => new Map(itemList.map((i) => [i.itemId, i])), [itemList]);

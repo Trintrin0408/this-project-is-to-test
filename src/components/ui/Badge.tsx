@@ -37,6 +37,7 @@ export const getStatusBadgeVariant = (status: string): BadgeVariant => {
     DRAFT: 'neutral',
     IN_PROGRESS: 'info',
     PENDING: 'warning',
+    OVERDUE: 'error',
     PENDING_SURVEY: 'warning',
     WAITING_FOR_DEPOSIT: 'warning',
     EXECUTING: 'info',

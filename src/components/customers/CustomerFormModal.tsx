@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -21,6 +22,9 @@ interface CustomerFormModalProps {
   onClose: () => void;
   editingCustomer?: Customer | null;
   isSubmitting?: boolean;
+  /** Lỗi từ backend khi lưu thất bại (vd trùng số điện thoại) — modal chỉ tự xử lý lỗi validate client-
+   * side (bắt buộc nhập/định dạng), lỗi server phải do component cha truyền vào để hiển thị. */
+  submitError?: string | null;
   onSubmit: (values: CustomerFormValues) => void;
 }
 
@@ -49,7 +53,7 @@ function validate(values: CustomerFormValues): CustomerFormErrors {
   return errors;
 }
 
-export function CustomerFormModal({ isOpen, onClose, editingCustomer, isSubmitting, onSubmit }: Readonly<CustomerFormModalProps>) {
+export function CustomerFormModal({ isOpen, onClose, editingCustomer, isSubmitting, submitError, onSubmit }: Readonly<CustomerFormModalProps>) {
   const [values, setValues] = useState(emptyValues);
   const [errors, setErrors] = useState<CustomerFormErrors>({});
   const [wasOpen, setWasOpen] = useState(isOpen);
@@ -100,6 +104,12 @@ export function CustomerFormModal({ isOpen, onClose, editingCustomer, isSubmitti
       footer={footer}
     >
       <div className="flex flex-col gap-4">
+        {submitError && (
+          <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-600 ring-1 ring-inset ring-red-600/20">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            {submitError}
+          </div>
+        )}
         <Input
           label="Họ và tên *"
           value={values.customerName}

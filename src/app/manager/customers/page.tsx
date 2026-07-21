@@ -310,6 +310,7 @@ export default function ManagerCustomersPage() {
         isOpen={isFormOpen}
         editingCustomer={editingCustomer}
         isSubmitting={isSubmitting}
+        submitError={formError}
         onClose={() => {
           setIsFormOpen(false);
           setEditingCustomer(null);

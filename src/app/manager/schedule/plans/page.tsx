@@ -1,47 +1,40 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Edit, Eye, FileText, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
+import { AlertTriangle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Edit, Eye, FileText, Loader2, MapPin, Plus, Search, Trash2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
 import type { PaginationState } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
 import PlanDetailDrawer from '@/components/planning/PlanDetailDrawer';
-import PlanFormDrawer from '@/components/planning/PlanFormDrawer';
+import PlanFormDrawer, { UnplannedOrderOption } from '@/components/planning/PlanFormDrawer';
 import Reveal from '@/components/ui/Reveal';
-import { formatDate } from '@/utils/formatDate';
+import { formatDate, formatTime } from '@/utils/formatDate';
+import { daysUntil, getEventUrgency } from '@/utils/eventDate';
+import { schedulePlanApiService } from '@/services/schedulePlan.service';
+import { orderApiService } from '@/services/order.service';
+import type { SchedulePlan } from '@/types/schedulePlan';
+import type { Order } from '@/types/order';
 import {
-  PlanStatus,
-  SchedulePlan,
-  deleteAdminSchedulePlan,
-  getAdminSchedulePlanByQuotationId,
-  getAdminSchedulePlans,
-  getPlanStatusInfo,
-  saveAdminSchedulePlan,
-} from '@/mocks/db/schedulePlans';
-import { getAdminQuotationById } from '@/mocks/db/quotations';
-import { getApproachingEvents } from '@/mocks/db/approachingEvents';
-import { getEventUrgency } from '@/utils/eventDate';
+  OrderPlanGroup,
+  distinctAssigneeCount,
+  getEarliestRowLead,
+  getGroupMinMaxRange,
+  getGroupStatusInfo,
+  groupPlansByOrder,
+} from '@/utils/schedulePlanGroups';
 
-// Bản mirror 1:1 của src/app/admin/coordination/planning/page.tsx dưới path /manager/schedule/plans
-// — xem giải thích nghiệp vụ ở đầu src/mocks/adminSchedulePlansMock.ts. Chỉ giữ 2 view (Lịch điều
-// phối + Danh sách kế hoạch) theo yêu cầu người dùng — bỏ view Kanban của file mẫu
-// docs/components/PlanningSection.tsx. Admin và Manager dùng chung 1 bộ mock/service — không fork
-// dữ liệu riêng cho Manager.
-
+// Kết nối backend thật (2026-07-21) — xem docs/kehoachvaphancong_api.md, docs/lichtimeline_api.md,
+// docs/chitietkehoach_api.md (mirror 1:1 với src/app/admin/coordination/planning/page.tsx). Phát
+// hiện quan trọng nhất: DB thật KHÔNG lưu "1 kế hoạch" như 1 bản ghi — mỗi dòng `schedule_plans` là
+// 1 order + 1 loại việc (task_id) riêng; 1 "kế hoạch" hiển thị trên UI = group nhiều dòng cùng
+// order_id (xử lý ở src/utils/schedulePlanGroups.ts). Đã bỏ hẳn luồng "đơn đặt ảo từ báo giá"
+// (?quotationId=, chưa có route nào trỏ vào đây kèm quotationId) — quyết định lập lịch khảo sát khi
+// báo giá chưa có đơn thật vẫn CHƯA implement được, chờ Backend đổi schema (mục 8.1/12 tài liệu trên).
 const WEEKDAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 const TIMELINE_DAY_COUNT = 10;
-
-function formatOrderId(id: string): string {
-  return id.replace(/^DD0*/, 'DD');
-}
-
-function formatTimelineOrderId(id: string): string {
-  return id.replace(/^DD/, 'ĐĐ-');
-}
 
 function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -58,110 +51,123 @@ function weekdayLabelOf(dateStr: string): string {
   return WEEKDAY_LABELS[(day + 6) % 7];
 }
 
-/** Khoảng ngày [bắt đầu, kết thúc] của 1 kế hoạch, lấy từ danh sách hoạt động (lắp đặt → trang trí...). */
-function planDateRange(plan: SchedulePlan): [string, string] {
-  const dates = plan.activities.map((a) => a.date);
-  if (dates.length === 0) return [plan.eventDate, plan.eventDate];
-  const sorted = [...dates].sort((a, b) => a.localeCompare(b));
-  return [sorted[0], sorted.at(-1) as string];
-}
-
 function dateDiffInDays(a: string, b: string): number {
   return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86_400_000);
 }
 
-function ManagerPlanningPageContent() {
-  const searchParams = useSearchParams();
-  const prefillOrderId = searchParams.get('orderId') ?? undefined;
-  const prefillQuotationId = searchParams.get('quotationId') ?? undefined;
-  const prefillQuotation = prefillQuotationId ? getAdminQuotationById(prefillQuotationId) : undefined;
-  // Báo giá này đã có kế hoạch khảo sát liên kết chưa — nếu có, mở thẳng drawer SỬA kế hoạch đó thay
-  // vì lại mở form tạo mới (khớp nút "Đổi lịch phân công" ở trang chi tiết báo giá).
-  const existingPlanForQuotation = prefillQuotationId ? getAdminSchedulePlanByQuotationId(prefillQuotationId) : undefined;
-  // Báo giá chưa có đơn đặt thật (chỉ tồn tại trước khi duyệt) — dựng 1 lựa chọn "đơn đặt ảo" từ
-  // thông tin báo giá để tái dùng chung form tạo kế hoạch, phục vụ lịch khảo sát hiện trường sớm.
-  const quotationOrderOption = prefillQuotation
-    ? {
-        orderId: prefillQuotation.code,
-        quotationId: prefillQuotation.quotationId,
-        customerName: prefillQuotation.customerName,
-        eventName: `Khảo sát hiện trường - Báo giá ${prefillQuotation.code}`,
-        eventDate: new Date().toISOString().slice(0, 10),
-        location: '',
-        coordinatorName: prefillQuotation.assignee,
-      }
-    : undefined;
-
-  const [plans, setPlans] = useState<SchedulePlan[]>(() => getAdminSchedulePlans());
+export default function ManagerPlanningPage() {
+  const [plans, setPlans] = useState<SchedulePlan[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'calendar' | 'timeline' | 'list'>('calendar');
 
-  const approachingEventsByOrderId = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof getApproachingEvents>>();
-    for (const event of getApproachingEvents(7)) {
-      map.set(event.orderId, [...(map.get(event.orderId) ?? []), event]);
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [plansRes, ordersRes] = await Promise.all([
+        schedulePlanApiService.getSchedulePlans(),
+        orderApiService.getOrders({ limit: 100 }),
+      ]);
+      setPlans(plansRes.data ?? []);
+      setOrders(ordersRes.data ?? []);
+    } catch {
+      setLoadError('Không tải được dữ liệu kế hoạch từ máy chủ. Vui lòng thử lại.');
+    } finally {
+      setLoading(false);
     }
-    return map;
   }, []);
-  const approachingPlans = useMemo(
-    () => plans.filter((p) => approachingEventsByOrderId.has(p.orderId)),
-    [plans, approachingEventsByOrderId],
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const groups = useMemo(() => groupPlansByOrder(plans), [plans]);
+  const groupByOrderId = useMemo(() => new Map(groups.map((g) => [g.orderId, g])), [groups]);
+  const unplannedOrders: UnplannedOrderOption[] = useMemo(
+    () =>
+      orders
+        .filter((o) => !groupByOrderId.has(o.orderId))
+        .map((o) => ({
+          orderId: o.orderId,
+          orderCode: o.orderCode,
+          customerName: o.customerName ?? '',
+          eventName: o.eventName ?? '',
+          eventDate: o.eventDate,
+          location: o.location ?? '',
+        })),
+    [orders, groupByOrderId],
   );
-  const approachingUrgentCount = approachingPlans.filter((p) =>
-    approachingEventsByOrderId.get(p.orderId)!.some((event) => getEventUrgency(event.daysLeft) === 'urgent'),
-  ).length;
-  const approachingSoonCount = approachingPlans.length - approachingUrgentCount;
+
+  const todayStr = useMemo(() => toDateStr(new Date()), []);
+
+  const approachingGroups = useMemo(
+    () => groups.filter((g) => getEventUrgency(daysUntil(g.eventDate, todayStr)) !== 'none'),
+    [groups, todayStr],
+  );
+  const approachingUrgentCount = approachingGroups.filter((g) => getEventUrgency(daysUntil(g.eventDate, todayStr)) === 'urgent').length;
+  const approachingSoonCount = approachingGroups.length - approachingUrgentCount;
 
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
-  const [statusFilter, setStatusFilter] = useState<PlanStatus | 'ALL'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'CHUAN_BI' | 'DA_CHOT' | 'DANG_THUC_HIEN' | 'HOAN_THANH' | 'DA_HUY'>('ALL');
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const today = new Date('2026-07-10');
-  const todayStr = toDateStr(today);
-  const [calendarMonth, setCalendarMonth] = useState(today.getMonth());
-  const [calendarYear, setCalendarYear] = useState(today.getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [selectedDate, setSelectedDate] = useState(todayStr);
 
-  const [timelineAnchor, setTimelineAnchor] = useState(() => {
-    if (plans.length === 0) return todayStr;
-    const starts = plans.map((p) => planDateRange(p)[0]).sort((a, b) => a.localeCompare(b));
-    return starts[0];
-  });
+  const [timelineAnchor, setTimelineAnchor] = useState(todayStr);
   const timelineDays = useMemo(() => Array.from({ length: TIMELINE_DAY_COUNT }, (_, i) => addDaysStr(timelineAnchor, i)), [timelineAnchor]);
   const timelineRows = useMemo(() => {
     const rangeStart = timelineDays[0];
     const rangeEnd = timelineDays.at(-1) as string;
-    return plans
-      .map((p) => ({ plan: p, range: planDateRange(p) }))
-      .filter(({ range }) => range[0] <= rangeEnd && range[1] >= rangeStart)
+    return groups
+      .map((g) => ({ group: g, range: getGroupMinMaxRange(g) }))
+      .filter(({ range }) => toDateStr(new Date(range[0])) <= rangeEnd && toDateStr(new Date(range[1])) >= rangeStart)
       .sort((a, b) => a.range[0].localeCompare(b.range[0]));
-  }, [plans, timelineDays]);
+  }, [groups, timelineDays]);
 
-  const [selectedPlanDetail, setSelectedPlanDetail] = useState<SchedulePlan | null>(null);
-  const [isFormOpen, setIsFormOpen] = useState(() => Boolean(prefillOrderId || prefillQuotationId));
-  const [editingPlan, setEditingPlan] = useState<SchedulePlan | null>(() => existingPlanForQuotation ?? null);
-  const [formSessionId, setFormSessionId] = useState(0);
-  const [deletingPlan, setDeletingPlan] = useState<SchedulePlan | null>(null);
+  const [selectedGroupDetail, setSelectedGroupDetail] = useState<OrderPlanGroup | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<OrderPlanGroup | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<OrderPlanGroup | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const filteredPlans = useMemo(() => {
+  const statusMatch = (g: OrderPlanGroup) => {
+    if (statusFilter === 'ALL') return true;
+    const label = getGroupStatusInfo(g.rows).label;
+    const map: Record<string, string> = {
+      CHUAN_BI: 'Chuẩn bị',
+      DA_CHOT: 'Đã chốt',
+      DANG_THUC_HIEN: 'Đang thực hiện',
+      HOAN_THANH: 'Hoàn thành',
+      DA_HUY: 'Đã hủy',
+    };
+    return label === map[statusFilter];
+  };
+
+  const filteredGroups = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return plans.filter((p) => {
-      if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
+    return groups.filter((g) => {
+      if (!statusMatch(g)) return false;
       if (!term) return true;
       return (
-        p.id.toLowerCase().includes(term) ||
-        p.orderId.toLowerCase().includes(term) ||
-        p.customerName.toLowerCase().includes(term) ||
-        p.eventName.toLowerCase().includes(term)
+        g.orderCode.toLowerCase().includes(term) ||
+        g.customerName.toLowerCase().includes(term) ||
+        g.eventName.toLowerCase().includes(term)
       );
     });
-  }, [plans, search, statusFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, search, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredPlans.length / limit));
+  const totalPages = Math.max(1, Math.ceil(filteredGroups.length / limit));
   const safePage = Math.min(page, totalPages);
-  const pageRows = filteredPlans.slice((safePage - 1) * limit, safePage * limit);
-  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredPlans.length, limit };
+  const pageRows = filteredGroups.slice((safePage - 1) * limit, safePage * limit);
+  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredGroups.length, limit };
 
   const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
   const firstDayOfWeek = new Date(calendarYear, calendarMonth, 1).getDay();
@@ -189,40 +195,59 @@ function ManagerPlanningPageContent() {
   };
 
   const handleGoToToday = () => {
-    setCalendarYear(today.getFullYear());
-    setCalendarMonth(today.getMonth());
-    setSelectedDate(today.toISOString().slice(0, 10));
+    const now = new Date();
+    setCalendarYear(now.getFullYear());
+    setCalendarMonth(now.getMonth());
+    setSelectedDate(toDateStr(now));
   };
 
-  const dayPlans = (dateStr: string) => plans.filter((p) => p.eventDate === dateStr || p.activities.some((a) => a.date === dateStr));
+  const groupHasRowOnDate = (g: OrderPlanGroup, dateStr: string) =>
+    toDateStr(new Date(g.eventDate)) === dateStr || g.rows.some((r) => toDateStr(new Date(r.startTime)) === dateStr);
 
-  const selectedDayPlans = dayPlans(selectedDate);
+  const dayGroups = (dateStr: string) => groups.filter((g) => groupHasRowOnDate(g, dateStr));
+  const selectedDayGroups = dayGroups(selectedDate);
 
   const openCreateForm = () => {
-    setEditingPlan(null);
+    setEditingGroup(null);
     setIsFormOpen(true);
-    setFormSessionId((id) => id + 1);
   };
 
-  const openEditForm = (plan: SchedulePlan) => {
-    setEditingPlan(plan);
+  const openEditForm = (group: OrderPlanGroup) => {
+    setEditingGroup(group);
     setIsFormOpen(true);
-    setFormSessionId((id) => id + 1);
   };
 
-  const handleSavePlan = (plan: SchedulePlan) => {
-    saveAdminSchedulePlan(plan);
-    setPlans(getAdminSchedulePlans());
-    setIsFormOpen(false);
-    setEditingPlan(null);
+  const handleDeleteConfirm = async () => {
+    if (!deletingGroup) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      for (const row of deletingGroup.rows) {
+        if (row.status === 'IN_PROGRESS' || row.status === 'COMPLETED') {
+          throw new Error(`Không thể hủy: hoạt động "${row.taskName ?? row.taskId}" đã ${row.status === 'IN_PROGRESS' ? 'đang thực hiện' : 'hoàn thành'}.`);
+        }
+      }
+      for (const row of deletingGroup.rows) {
+        if (row.status !== 'CANCELLED') {
+          await schedulePlanApiService.updateSchedulePlanStatus(row.planId, { status: 'CANCELLED' });
+        }
+      }
+      await reload();
+      setDeletingGroup(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Có lỗi khi hủy kế hoạch.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
-  const handleDeleteConfirm = () => {
-    if (!deletingPlan) return;
-    deleteAdminSchedulePlan(deletingPlan.id);
-    setPlans(getAdminSchedulePlans());
-    setDeletingPlan(null);
-  };
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center p-6 text-sm text-slate-400">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Đang tải kế hoạch điều phối...
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -278,7 +303,14 @@ function ManagerPlanningPageContent() {
         </div>
       </div>
 
-      {approachingPlans.length > 0 && (
+      {loadError && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {loadError}
+        </div>
+      )}
+
+      {approachingGroups.length > 0 && (
         <div
           className={`mt-4 flex items-start gap-2.5 rounded-xl border p-3.5 text-xs ${
             approachingUrgentCount > 0 ? 'border-red-200 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-700'
@@ -286,7 +318,7 @@ function ManagerPlanningPageContent() {
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            Có <strong>{approachingPlans.length}</strong> kế hoạch có mốc thời gian (tổ chức/khảo sát/lắp đặt/thu hồi) sắp diễn ra trong 7 ngày tới
+            Có <strong>{approachingGroups.length}</strong> kế hoạch có mốc thời gian (tổ chức/khảo sát/lắp đặt/thu hồi) sắp diễn ra trong 7 ngày tới
             {approachingUrgentCount > 0 && (
               <>
                 {' '}
@@ -306,19 +338,22 @@ function ManagerPlanningPageContent() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Tìm kiếm mã kế hoạch, khách hàng, tên lễ cưới..."
+              placeholder="Tìm kiếm mã đơn, khách hàng, tên sự kiện..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-1.5 pl-9 pr-4 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as PlanStatus | 'ALL')}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
               className="cursor-pointer rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-100"
             >
               <option value="ALL">Tất cả trạng thái</option>
-              <option value="DRAFT">Bản nháp</option>
-              <option value="CONFIRMED">Đã xác nhận</option>
+              <option value="CHUAN_BI">Chuẩn bị</option>
+              <option value="DA_CHOT">Đã chốt</option>
+              <option value="DANG_THUC_HIEN">Đang thực hiện</option>
+              <option value="HOAN_THANH">Hoàn thành</option>
+              <option value="DA_HUY">Đã hủy</option>
             </select>
             <button
               type="button"
@@ -364,7 +399,7 @@ function ManagerPlanningPageContent() {
                 if (dayNum === null) return <div key={`empty-${cellIdx}`} className="aspect-square rounded-xl border border-slate-100/30 bg-slate-50/10" />;
 
                 const dayString = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                const plansOnDay = dayPlans(dayString);
+                const groupsOnDay = dayGroups(dayString);
                 const isSelected = selectedDate === dayString;
 
                 return (
@@ -377,23 +412,23 @@ function ManagerPlanningPageContent() {
                   >
                     <div className="flex items-center justify-between">
                       <span className={`text-[11px] font-bold ${isSelected ? 'rounded-md bg-blue-100/80 px-1.5 py-0.5 text-blue-700' : 'text-slate-700'}`}>{dayNum}</span>
-                      {plansOnDay.length > 0 && !isSelected && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
+                      {groupsOnDay.length > 0 && !isSelected && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />}
                     </div>
                     <div className="mt-1 space-y-1 overflow-hidden">
-                      {plansOnDay.slice(0, 2).map((p) => {
-                        const info = getPlanStatusInfo(p);
+                      {groupsOnDay.slice(0, 2).map((g) => {
+                        const info = getGroupStatusInfo(g.rows);
                         return (
                           <div
-                            key={p.id}
+                            key={g.orderId}
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedDate(dayString);
-                              setSelectedPlanDetail(p);
+                              setSelectedGroupDetail(g);
                             }}
-                            title={`${p.eventName} @ ${p.location}`}
+                            title={`${g.eventName} @ ${g.location}`}
                             className={`truncate rounded-md px-1 py-0.5 text-[9px] font-bold leading-tight ${info.badgeClass}`}
                           >
-                            {formatOrderId(p.orderId)}
+                            {g.orderCode}
                           </div>
                         );
                       })}
@@ -427,11 +462,11 @@ function ManagerPlanningPageContent() {
                 </div>
                 <h3 className="text-sm font-extrabold tracking-tight text-slate-800">Lịch ngày {formatDate(selectedDate)}</h3>
               </div>
-              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">{selectedDayPlans.length} sự kiện</span>
+              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">{selectedDayGroups.length} sự kiện</span>
             </div>
 
             <div className="max-h-[580px] flex-1 space-y-3.5 overflow-y-auto pr-1">
-              {selectedDayPlans.length === 0 ? (
+              {selectedDayGroups.length === 0 ? (
                 <div className="my-auto flex h-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/30 p-8 py-16 text-center">
                   <div className="mb-3 rounded-full bg-slate-100 p-3 text-slate-400">
                     <CalendarIcon className="h-6 w-6" />
@@ -440,15 +475,18 @@ function ManagerPlanningPageContent() {
                   <p className="max-w-[220px] text-[11px] leading-relaxed text-slate-400">Chưa có kế hoạch thi công, lắp đặt hoặc trang trí nào vào ngày này.</p>
                 </div>
               ) : (
-                selectedDayPlans.map((p) => {
-                  const info = getPlanStatusInfo(p);
-                  const dayActivities = p.activities.filter((a) => a.date === selectedDate);
-                  const start = dayActivities[0]?.startTime ?? '08:00';
-                  const end = dayActivities[dayActivities.length - 1]?.endTime ?? '17:00';
+                selectedDayGroups.map((g) => {
+                  const info = getGroupStatusInfo(g.rows);
+                  const dayRows = g.rows.filter((r) => toDateStr(new Date(r.startTime)) === selectedDate);
+                  const start = dayRows[0] ? formatTime(dayRows[0].startTime) : '—';
+                  const lastRow = dayRows.at(-1);
+                  const end = lastRow?.endTime ? formatTime(lastRow.endTime) : '—';
+                  const lead = getEarliestRowLead(dayRows.length > 0 ? dayRows : g.rows);
+                  const staffCount = distinctAssigneeCount(dayRows.length > 0 ? dayRows : g.rows);
                   return (
                     <div
-                      key={p.id}
-                      onClick={() => setSelectedPlanDetail(p)}
+                      key={g.orderId}
+                      onClick={() => setSelectedGroupDetail(g)}
                       className="group relative flex cursor-pointer flex-col items-start gap-4 rounded-2xl border border-slate-150 p-4 shadow-2xs transition-all hover:border-blue-400 hover:shadow-xs md:flex-row"
                     >
                       <div className="flex min-w-[70px] flex-col items-start justify-center border-b border-slate-100 pb-2 md:border-b-0 md:border-r md:pb-0 md:pr-4">
@@ -458,22 +496,22 @@ function ManagerPlanningPageContent() {
                       </div>
                       <div className="w-full flex-1 space-y-2.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-extrabold text-blue-700">{p.orderId}</span>
+                          <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 font-mono text-[10px] font-extrabold text-blue-700">{g.orderCode}</span>
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600">
                             <span className={`h-2 w-2 rounded-full ${info.dotColorClass}`} />
                             {info.label}
                           </span>
                         </div>
-                        <h4 className="text-xs font-bold leading-snug text-slate-900 transition-colors group-hover:text-blue-600">{p.eventName}</h4>
+                        <h4 className="text-xs font-bold leading-snug text-slate-900 transition-colors group-hover:text-blue-600">{g.eventName}</h4>
                         <div className="space-y-1.5 text-[10px] text-slate-500">
-                          <p className="flex items-center gap-1.5" title={p.location}>
+                          <p className="flex items-center gap-1.5" title={g.location}>
                             <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
-                            <span className="truncate">{p.location}</span>
+                            <span className="truncate">{g.location}</span>
                           </p>
                           <p className="flex items-center gap-1.5">
                             <Users className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
                             <span className="truncate font-medium text-slate-600">
-                              Chỉ huy: <strong className="font-semibold text-slate-800">{p.manager}</strong> ({p.staffList.length} nhân sự)
+                              Chỉ huy: <strong className="font-semibold text-slate-800">{lead ?? 'Chưa gán'}</strong> ({staffCount} nhân sự)
                             </span>
                           </p>
                         </div>
@@ -545,30 +583,32 @@ function ManagerPlanningPageContent() {
                   <p className="text-xs font-medium text-slate-400">Không có kế hoạch nào trong khoảng thời gian này.</p>
                 </div>
               ) : (
-                timelineRows.map(({ plan, range }) => {
-                  const info = getPlanStatusInfo(plan);
-                  const startCol = Math.max(1, dateDiffInDays(timelineDays[0], range[0]) + 1);
-                  const endCol = Math.min(TIMELINE_DAY_COUNT, dateDiffInDays(timelineDays[0], range[1]) + 1);
+                timelineRows.map(({ group, range }) => {
+                  const info = getGroupStatusInfo(group.rows);
+                  const rangeStartStr = toDateStr(new Date(range[0]));
+                  const rangeEndStr = toDateStr(new Date(range[1]));
+                  const startCol = Math.max(1, dateDiffInDays(timelineDays[0], rangeStartStr) + 1);
+                  const endCol = Math.min(TIMELINE_DAY_COUNT, dateDiffInDays(timelineDays[0], rangeEndStr) + 1);
                   return (
-                    <div key={plan.id} className="grid grid-cols-[220px_1fr] border-b border-slate-100/80">
+                    <div key={group.orderId} className="grid grid-cols-[220px_1fr] border-b border-slate-100/80">
                       <div className="flex items-center gap-2 py-3">
                         <span className={`h-2 w-2 shrink-0 rounded-full ${info.dotColorClass}`} />
                         <div className="min-w-0">
-                          <p className="truncate text-xs font-bold text-slate-800">{formatTimelineOrderId(plan.orderId)}</p>
+                          <p className="truncate text-xs font-bold text-slate-800">{group.orderCode}</p>
                           <p className="text-[10px] text-slate-400">
-                            {formatDate(range[0])} - {formatDate(range[1])}
+                            {formatDate(rangeStartStr)} - {formatDate(rangeEndStr)}
                           </p>
                         </div>
                       </div>
                       <div className="relative grid py-3" style={{ gridTemplateColumns: `repeat(${TIMELINE_DAY_COUNT}, minmax(0, 1fr))` }}>
                         <button
                           type="button"
-                          onClick={() => setSelectedPlanDetail(plan)}
-                          title={`${plan.eventName} — nhấp để xem chi tiết`}
+                          onClick={() => setSelectedGroupDetail(group)}
+                          title={`${group.eventName} — nhấp để xem chi tiết`}
                           className={`truncate rounded-full px-2.5 py-1.5 text-center text-[11px] font-bold transition-opacity hover:opacity-80 ${info.badgeClass}`}
                           style={{ gridColumn: `${startCol} / ${endCol + 1}` }}
                         >
-                          {formatTimelineOrderId(plan.orderId)}
+                          {group.orderCode}
                         </button>
                       </div>
                     </div>
@@ -581,7 +621,7 @@ function ManagerPlanningPageContent() {
           <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-slate-50 p-3.5">
             <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
             <p className="text-[11px] italic leading-relaxed text-slate-500">
-              Mẹo: Nhấp vào thanh ngang màu sắc của đơn hàng (ví dụ <strong className="font-bold not-italic text-slate-700">{formatTimelineOrderId(timelineRows[0]?.plan.orderId ?? 'DD0001')}</strong>) trên bảng
+              Mẹo: Nhấp vào thanh ngang màu sắc của đơn hàng (ví dụ <strong className="font-bold not-italic text-slate-700">{timelineRows[0]?.group.orderCode ?? 'ORD-001'}</strong>) trên bảng
               timeline để hiển thị Drawer chi tiết các công việc, nhân sự phân công và trang thiết bị thực tế.
             </p>
           </div>
@@ -594,9 +634,8 @@ function ManagerPlanningPageContent() {
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  <th className="px-4 py-3.5">Mã kế hoạch</th>
                   <th className="px-4 py-3.5">Mã đơn đặt</th>
-                  <th className="px-4 py-3.5">Khách hàng / Tiệc cưới</th>
+                  <th className="px-4 py-3.5">Khách hàng / Sự kiện</th>
                   <th className="px-4 py-3.5">Ngày thi công</th>
                   <th className="px-4 py-3.5">Địa điểm</th>
                   <th className="px-4 py-3.5">Số công việc</th>
@@ -607,24 +646,26 @@ function ManagerPlanningPageContent() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {pageRows.length > 0 ? (
-                  pageRows.map((p) => {
-                    const info = getPlanStatusInfo(p);
+                  pageRows.map((g) => {
+                    const info = getGroupStatusInfo(g.rows);
+                    const [rangeStart, rangeEnd] = getGroupMinMaxRange(g);
                     return (
-                      <tr key={p.id} className="transition-colors hover:bg-slate-50/60">
-                        <td className="px-4 py-3 font-mono font-bold text-slate-900">{p.id}</td>
+                      <tr key={g.orderId} className="transition-colors hover:bg-slate-50/60">
                         <td className="px-4 py-3">
-                          <span className="rounded bg-slate-100 px-2 py-1 font-mono font-medium text-slate-800">{p.orderId}</span>
+                          <span className="rounded bg-slate-100 px-2 py-1 font-mono font-medium text-slate-800">{g.orderCode}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <p className="font-semibold text-slate-900">{p.customerName}</p>
-                          <p className="mt-0.5 text-[10px] text-slate-400">{p.eventName}</p>
+                          <p className="font-semibold text-slate-900">{g.customerName}</p>
+                          <p className="mt-0.5 text-[10px] text-slate-400">{g.eventName}</p>
                         </td>
-                        <td className="px-4 py-3 font-medium text-slate-600">{formatDate(p.eventDate)}</td>
-                        <td className="max-w-xs truncate px-4 py-3 text-slate-500" title={p.location}>
-                          {p.location}
+                        <td className="px-4 py-3 font-medium text-slate-600">
+                          {formatDate(rangeStart)} - {formatDate(rangeEnd)}
                         </td>
-                        <td className="px-4 py-3 font-bold text-slate-700">{p.tasks.length} việc</td>
-                        <td className="px-4 py-3 text-slate-600">{p.staffList.length} người</td>
+                        <td className="max-w-xs truncate px-4 py-3 text-slate-500" title={g.location}>
+                          {g.location}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-slate-700">{g.rows.length} việc</td>
+                        <td className="px-4 py-3 text-slate-600">{distinctAssigneeCount(g.rows)} người</td>
                         <td className="px-4 py-3">
                           <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${info.badgeClass}`}>{info.label}</span>
                         </td>
@@ -632,7 +673,7 @@ function ManagerPlanningPageContent() {
                           <div className="flex justify-end gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setSelectedPlanDetail(p)}
+                              onClick={() => setSelectedGroupDetail(g)}
                               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 font-medium text-slate-700 hover:bg-slate-50"
                             >
                               <Eye className="h-3.5 w-3.5" />
@@ -640,7 +681,7 @@ function ManagerPlanningPageContent() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => openEditForm(p)}
+                              onClick={() => openEditForm(g)}
                               title="Chỉnh sửa kế hoạch"
                               className="rounded-lg border border-slate-200 p-1 text-slate-600 hover:bg-slate-50"
                             >
@@ -648,8 +689,8 @@ function ManagerPlanningPageContent() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => setDeletingPlan(p)}
-                              title="Xóa kế hoạch"
+                              onClick={() => setDeletingGroup(g)}
+                              title="Hủy kế hoạch"
                               className="rounded-lg border border-slate-200 p-1 text-slate-400 hover:bg-slate-50 hover:text-rose-600"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -661,7 +702,7 @@ function ManagerPlanningPageContent() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center">
+                    <td colSpan={8} className="px-4 py-12 text-center">
                       <Clock className="mx-auto h-6 w-6 text-slate-300" />
                       <p className="mt-2 text-sm font-medium text-slate-500">Không tìm thấy kế hoạch điều phối nào</p>
                       <p className="text-xs text-slate-400">Thử thay đổi bộ lọc hoặc thêm mới kế hoạch.</p>
@@ -676,56 +717,50 @@ function ManagerPlanningPageContent() {
       )}
 
       <AnimatePresence>
-        {selectedPlanDetail && (
+        {selectedGroupDetail && (
           <PlanDetailDrawer
-            plan={selectedPlanDetail}
-            onClose={() => setSelectedPlanDetail(null)}
-            onEdit={(plan) => {
-              openEditForm(plan);
-            }}
+            group={groupByOrderId.get(selectedGroupDetail.orderId) ?? selectedGroupDetail}
+            onClose={() => setSelectedGroupDetail(null)}
+            onEdit={(group) => openEditForm(group)}
           />
         )}
       </AnimatePresence>
 
-      <PlanFormDrawer
-        key={formSessionId}
-        isOpen={isFormOpen}
-        editingPlan={editingPlan}
-        defaultOrderId={formSessionId === 0 ? prefillOrderId : undefined}
-        quotationOrderOption={formSessionId === 0 ? quotationOrderOption : undefined}
-        onClose={() => {
-          setIsFormOpen(false);
-          setEditingPlan(null);
-        }}
-        onSave={handleSavePlan}
-      />
+      {isFormOpen && (
+        <PlanFormDrawer
+          isOpen={isFormOpen}
+          editingGroup={editingGroup ? (groupByOrderId.get(editingGroup.orderId) ?? editingGroup) : null}
+          unplannedOrders={unplannedOrders}
+          onClose={() => {
+            setIsFormOpen(false);
+            setEditingGroup(null);
+          }}
+          onSaved={reload}
+        />
+      )}
 
       <Modal
-        isOpen={Boolean(deletingPlan)}
-        onClose={() => setDeletingPlan(null)}
-        title="Xóa kế hoạch điều phối"
-        subtitle={deletingPlan ? `Bạn có chắc muốn xóa kế hoạch "${deletingPlan.id}"? Hành động này không thể hoàn tác.` : undefined}
+        isOpen={Boolean(deletingGroup)}
+        onClose={() => {
+          setDeletingGroup(null);
+          setDeleteError(null);
+        }}
+        title="Hủy kế hoạch điều phối"
+        subtitle={deletingGroup ? `Bạn có chắc muốn hủy toàn bộ kế hoạch của đơn "${deletingGroup.orderCode}"? Hành động này không thể hoàn tác.` : undefined}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeletingPlan(null)}>
-              Hủy
+            <Button variant="secondary" onClick={() => setDeletingGroup(null)} disabled={deleting}>
+              Hủy bỏ
             </Button>
-            <Button variant="danger" onClick={handleDeleteConfirm}>
-              Xóa kế hoạch
+            <Button variant="danger" onClick={handleDeleteConfirm} disabled={deleting}>
+              {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Xác nhận hủy kế hoạch
             </Button>
           </>
         }
       >
-        <div />
+        {deleteError && <p className="text-xs text-rose-600">{deleteError}</p>}
       </Modal>
     </div>
-  );
-}
-
-export default function ManagerPlanningPage() {
-  return (
-    <Suspense fallback={<div className="p-6 text-sm text-slate-400">Đang tải...</div>}>
-      <ManagerPlanningPageContent />
-    </Suspense>
   );
 }

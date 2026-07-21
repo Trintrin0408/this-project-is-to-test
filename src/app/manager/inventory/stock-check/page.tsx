@@ -1,166 +1,128 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Calendar, Eye, MoreHorizontal, Search, SlidersHorizontal, Wrench } from 'lucide-react';
+import { Search, SlidersHorizontal, Wrench } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
-import EquipmentDetailModal from '@/components/catalog/EquipmentDetailModal';
+import { Pagination } from '@/components/ui/Pagination';
+import type { PaginationState } from '@/hooks/usePagination';
+import InventoryDetailModal from '@/components/catalog/InventoryDetailModal';
 import { useDebounce } from '@/hooks/useDebounce';
-import {
-  AdminEquipment,
-  EQUIPMENT_CATEGORY_OPTIONS,
-  StockLogType,
-  adjustAdminEquipmentStock,
-  getAdminEquipment,
-} from '@/mocks/db/catalog';
+import { inventoryApiService } from '@/services/inventory.service';
+import type { InventoryRow } from '@/types/inventory';
 
-// Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminEquipmentMock.ts. Bố cục port từ
-// docs/components/ProductsAndEquipmentView.tsx (nhánh "Tồn kho doanh nghiệp"): số lượng khả dụng/đã
-// khóa được mô phỏng lại theo ngày chọn trên bảng (giống UC 2.13 - Date-based Inventory Lock) bằng
-// công thức seed cố định theo id sản phẩm + ngày; số lượng hỏng/tổng số lượng lấy trực tiếp từ store
-// nên không đổi theo ngày. Trang "Hỏng, mất & bảo trì" liên kết bên cạnh vẫn dùng API thật như trước.
-// Mirror của src/app/admin/inventory/stock-status/page.tsx cho vai trò Manager — dùng chung mock/service/UI.
-// Ghi chú: chưa có route /manager/inventory/maintenance nên nút "Thiết bị đang bảo trì" tạm thời vẫn
-// trỏ về /admin/inventory/maintenance (không có trang Manager tương đương trong điều hướng hiện tại).
-
-interface SimulatedStock {
-  availableStock: number;
-  rentedStock: number;
-  maintenanceStock: number;
-  totalStock: number;
-}
-
-function getSimulatedStockForDate(equipment: AdminEquipment, dateStr: string): SimulatedStock {
-  let displayAvailable = equipment.availableStock;
-  let displayRented = equipment.rentedStock;
-  const displayMaintenance = equipment.maintenanceStock;
-
-  if (dateStr) {
-    const dateObj = new Date(dateStr);
-    const day = dateObj.getDate() || 1;
-    const month = (dateObj.getMonth() + 1) || 1;
-    const year = dateObj.getFullYear() || 2026;
-
-    const allocatable = equipment.availableStock + equipment.rentedStock;
-    if (allocatable > 0) {
-      const seed = (equipment.id.charCodeAt(equipment.id.length - 1) || 0) + day + month * 7 + year;
-      const rentedPercent = 5 + (seed % 81); // 5% đến 85%
-      const simulatedRented = Math.round((allocatable * rentedPercent) / 100);
-      displayRented = Math.max(0, Math.min(allocatable, simulatedRented));
-      displayAvailable = allocatable - displayRented;
-    } else {
-      displayRented = 0;
-      displayAvailable = 0;
-    }
-  }
-
-  return {
-    availableStock: displayAvailable,
-    rentedStock: displayRented,
-    maintenanceStock: displayMaintenance,
-    totalStock: displayAvailable + displayRented + displayMaintenance,
-  };
-}
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+// Nối API thật theo docs/tonkhodoanhnghiep_api.md (2026-07-20) — GET /api/v1/inventory (bảng
+// `inventory` thật ra ĐÃ được tạo, tin mới hơn ghi nhận cũ ở docs/more-require.md mục (b)) trả sẵn
+// itemCode/itemName/categoryName/typeName + 4 số liệu tồn kho (quantityTotal/quantityDamaged/
+// quantityReserved/quantityAvailable). Đã bỏ ô chọn ngày (Date-based Inventory Lock) khỏi UI — xác
+// nhận qua curl backend KHÔNG áp dụng `date` vào việc tính `quantityReserved` (số này không đổi theo
+// ngày), giữ ô chọn ngày sẽ gây hiểu nhầm là số liệu date-based thật. `categoryId`/`onlyDamaged` cũng
+// bị backend bỏ qua — FE tự lọc theo `categoryName`/`quantityDamaged > 0` phía client (dữ liệu hiện
+// còn rất nhỏ, chấp nhận được). Xem chi tiết 3 gap này ở docs/more-require.md mục (u).
+// Mirror của src/app/admin/inventory/stock-status/page.tsx cho vai trò Manager.
 
 export default function ManagerStockCheckPage() {
-  const [equipment, setEquipment] = useState<AdminEquipment[]>(() => getAdminEquipment());
+  const [rows, setRows] = useState<InventoryRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 300);
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [selectedDate, setSelectedDate] = useState(todayStr());
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [onlyMaintenance, setOnlyMaintenance] = useState(false);
-  const [viewingEquipment, setViewingEquipment] = useState<AdminEquipment | null>(null);
+  const [onlyDamaged, setOnlyDamaged] = useState(false);
+  const [page, setPage] = useState(1);
+  const limit = 10;
 
-  const refresh = () => setEquipment(getAdminEquipment());
+  const [viewingItemId, setViewingItemId] = useState<string | null>(null);
 
-  const filteredEquipment = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return equipment.filter((e) => {
-      if (categoryFilter && e.category !== categoryFilter) return false;
-      if (onlyMaintenance && e.maintenanceStock <= 0) return false;
-      if (term && !(e.id.toLowerCase().includes(term) || e.name.toLowerCase().includes(term))) return false;
-      return true;
-    });
-  }, [equipment, search, categoryFilter, onlyMaintenance]);
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setLoadError(null);
+    inventoryApiService
+      .getInventory({ search: search.trim() || undefined, limit: 100 })
+      .then((res) => {
+        if (cancelled) return;
+        setRows(res.data ?? []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRows([]);
+        setLoadError('Không tải được danh sách tồn kho. Vui lòng thử lại.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [search, reloadToken]);
 
-  const handleAdjustStock = (type: StockLogType, quantity: number, reason: string) => {
-    if (!viewingEquipment) return;
-    adjustAdminEquipmentStock(viewingEquipment.id, type, quantity, reason, 'Điều chỉnh thủ công');
-    refresh();
-    setViewingEquipment(getAdminEquipment().find((e) => e.id === viewingEquipment.id) ?? null);
-  };
+  useEffect(() => {
+    setPage(1);
+  }, [search, categoryFilter, onlyDamaged]);
 
-  const columns: TableColumn<AdminEquipment>[] = [
-    { key: 'id', label: 'ID', render: (row) => <span className="font-semibold text-slate-400">{row.id}</span> },
+  const categoryOptions = useMemo(
+    () => Array.from(new Set(rows.map((r) => r.categoryName).filter((v): v is string => Boolean(v)))),
+    [rows],
+  );
+
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((r) => {
+        if (categoryFilter && r.categoryName !== categoryFilter) return false;
+        if (onlyDamaged && r.quantityDamaged <= 0) return false;
+        return true;
+      }),
+    [rows, categoryFilter, onlyDamaged],
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / limit));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filteredRows.slice((safePage - 1) * limit, safePage * limit);
+  const paginationState: PaginationState = { currentPage: safePage, totalPages, totalItems: filteredRows.length, limit };
+
+  const columns: TableColumn<InventoryRow>[] = [
+    { key: 'itemCode', label: 'ID', render: (row) => <span className="font-semibold text-slate-400">{row.itemCode}</span> },
     {
-      key: 'name',
+      key: 'itemName',
       label: 'Tên sản phẩm & thiết bị',
       render: (row) => (
-        <button type="button" onClick={() => setViewingEquipment(row)} className="text-left font-semibold text-blue-600 hover:underline">
-          {row.name}
+        <button type="button" onClick={() => setViewingItemId(row.itemId)} className="text-left font-semibold text-blue-600 hover:underline">
+          {row.itemName}
         </button>
       ),
     },
-    { key: 'category', label: 'Nhóm sản phẩm', render: (row) => <span className="text-slate-600">{row.category}</span> },
+    { key: 'categoryName', label: 'Nhóm sản phẩm', render: (row) => <span className="text-slate-600">{row.categoryName}</span> },
     {
-      key: 'availableStock',
+      key: 'quantityAvailable',
       label: 'Tổng khả dụng',
       className: 'text-center',
-      render: (row) => <span className="font-bold text-emerald-600">{getSimulatedStockForDate(row, selectedDate).availableStock}</span>,
+      render: (row) => <span className="font-bold text-emerald-600">{row.quantityAvailable}</span>,
     },
     {
-      key: 'rentedStock',
+      key: 'quantityReserved',
       label: 'Số lượng đã khóa',
       className: 'text-center',
-      render: (row) => <span className="font-bold text-blue-600">{getSimulatedStockForDate(row, selectedDate).rentedStock}</span>,
+      render: (row) => <span className="font-bold text-blue-600">{row.quantityReserved}</span>,
     },
     {
-      key: 'maintenanceStock',
+      key: 'quantityDamaged',
       label: 'Số lượng hỏng',
       className: 'text-center',
-      render: (row) => <span className="font-bold text-rose-600">{getSimulatedStockForDate(row, selectedDate).maintenanceStock}</span>,
+      render: (row) => <span className="font-bold text-rose-600">{row.quantityDamaged}</span>,
     },
     {
-      key: 'totalStock',
+      key: 'quantityTotal',
       label: 'Tổng số lượng',
       className: 'text-center bg-slate-50/60',
-      render: (row) => <span className="font-bold text-slate-900">{getSimulatedStockForDate(row, selectedDate).totalStock}</span>,
-    },
-    {
-      key: 'actions',
-      label: 'Thao tác',
-      className: 'text-center',
-      render: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          <button
-            type="button"
-            aria-label="Xem chi tiết"
-            title="Xem chi tiết"
-            onClick={() => setViewingEquipment(row)}
-            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Tùy chọn"
-            title="Tùy chọn"
-            onClick={() => setViewingEquipment(row)}
-            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
-        </div>
-      ),
+      render: (row) => <span className="font-bold text-slate-900">{row.quantityTotal}</span>,
     },
   ];
 
@@ -201,11 +163,8 @@ export default function ManagerStockCheckPage() {
             <Select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              options={[{ value: '', label: 'Nhóm sản phẩm' }, ...EQUIPMENT_CATEGORY_OPTIONS.map((c) => ({ value: c, label: c }))]}
+              options={[{ value: '', label: 'Nhóm sản phẩm' }, ...categoryOptions.map((c) => ({ value: c, label: c }))]}
             />
-          </div>
-          <div className="w-full md:w-48">
-            <Input type="date" icon={<Calendar className="h-4 w-4" />} value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
           </div>
           <Button type="button" variant={showAdvancedFilters ? 'primary' : 'secondary'} onClick={() => setShowAdvancedFilters((v) => !v)}>
             <SlidersHorizontal className="h-4 w-4" />
@@ -218,8 +177,8 @@ export default function ManagerStockCheckPage() {
             <input
               id="only-maintenance"
               type="checkbox"
-              checked={onlyMaintenance}
-              onChange={(e) => setOnlyMaintenance(e.target.checked)}
+              checked={onlyDamaged}
+              onChange={(e) => setOnlyDamaged(e.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
             <label htmlFor="only-maintenance" className="text-sm font-medium text-slate-600">
@@ -229,15 +188,23 @@ export default function ManagerStockCheckPage() {
         )}
 
         <div className="mt-4">
-          <Table columns={columns} rows={filteredEquipment} rowKey={(row) => row.id} />
+          {isLoading ? (
+            <p className="py-10 text-center text-sm text-slate-400">Đang tải danh sách tồn kho...</p>
+          ) : loadError ? (
+            <p className="py-10 text-center text-sm text-red-500">{loadError}</p>
+          ) : (
+            <Table columns={columns} rows={pageRows} rowKey={(row) => row.itemId} />
+          )}
         </div>
+
+        <Pagination pagination={paginationState} onPageChange={setPage} />
       </motion.div>
 
-      <EquipmentDetailModal
-        isOpen={Boolean(viewingEquipment)}
-        onClose={() => setViewingEquipment(null)}
-        equipment={viewingEquipment}
-        onAdjustStock={handleAdjustStock}
+      <InventoryDetailModal
+        isOpen={Boolean(viewingItemId)}
+        onClose={() => setViewingItemId(null)}
+        itemId={viewingItemId}
+        onAdjusted={() => setReloadToken((t) => t + 1)}
       />
     </div>
   );

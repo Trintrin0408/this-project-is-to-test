@@ -12,7 +12,6 @@ import { formatDate } from '@/utils/formatDate';
 import type { InventoryRow } from '@/types/inventory';
 
 interface MaintenanceRow {
-  inventoryId: string;
   itemId: string;
   itemName: string;
   damagedQuantity: number;
@@ -33,7 +32,6 @@ export default function Page() {
         const maintenanceRows: MaintenanceRow[] = (inventoryRes.data as InventoryRow[])
           .filter((row) => row.quantityDamaged > 0)
           .map((row) => ({
-            inventoryId: row.inventoryId,
             itemId: row.itemId,
             itemName: row.itemName ?? row.itemId,
             damagedQuantity: row.quantityDamaged,
@@ -93,7 +91,7 @@ export default function Page() {
           <Table
             columns={columns}
             rows={filteredRows}
-            rowKey={(row) => row.inventoryId}
+            rowKey={(row) => row.itemId}
             isLoading={isLoading}
             emptyText="Không có thiết bị nào đang bảo trì."
           />
