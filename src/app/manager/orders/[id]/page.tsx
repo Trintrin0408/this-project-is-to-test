@@ -204,7 +204,6 @@ function ManagerOrderDetailContent() {
   const [picklistInventory, setPicklistInventory] = useState<Record<string, InventoryRow>>({});
 
   const [viewingScheduleItem, setViewingScheduleItem] = useState<SchedulePlan | null>(null);
-  const [confirmingPlanId, setConfirmingPlanId] = useState<string | null>(null);
   const [cancelingPlanId, setCancelingPlanId] = useState<string | null>(null);
   const [isUpdatingPlanStatus, setIsUpdatingPlanStatus] = useState(false);
   const [evidenceModal, setEvidenceModal] = useState<{ isLoading: boolean; evidence: Evidence | null } | null>(null);
@@ -433,17 +432,6 @@ function ManagerOrderDetailContent() {
       });
       setPicklistInventory(next);
     });
-  };
-
-  const handleConfirmPlan = async (planId: string) => {
-    setIsUpdatingPlanStatus(true);
-    try {
-      await schedulePlanApiService.updateSchedulePlanStatus(planId, { status: 'CONFIRMED' });
-      setConfirmingPlanId(null);
-      load();
-    } finally {
-      setIsUpdatingPlanStatus(false);
-    }
   };
 
   const handleCancelPlan = async (planId: string) => {
@@ -1065,7 +1053,6 @@ function ManagerOrderDetailContent() {
               ) : (
                 <div className="mt-4 space-y-3">
                   {schedulePlans.map((plan, idx) => {
-                    const canConfirm = plan.status === 'PENDING';
                     const canEdit = plan.status !== 'IN_PROGRESS' && plan.status !== 'COMPLETED' && plan.status !== 'CANCELLED';
                     const canCancel = canEdit;
                     return (
@@ -1125,16 +1112,6 @@ function ManagerOrderDetailContent() {
                             <Eye className="h-3.5 w-3.5" />
                             Xem chi tiết
                           </button>
-                          {canConfirm && (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmingPlanId(plan.planId)}
-                              className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              Xác nhận kế hoạch
-                            </button>
-                          )}
                           {plan.status === 'COMPLETED' && plan.evidenceId && (
                             <button
                               type="button"
@@ -1493,25 +1470,6 @@ function ManagerOrderDetailContent() {
             </div>
           </div>
         )}
-      </Modal>
-
-      <Modal
-        isOpen={Boolean(confirmingPlanId)}
-        onClose={() => setConfirmingPlanId(null)}
-        title="Xác nhận kế hoạch thi công?"
-        subtitle="Kế hoạch chuyển sang trạng thái Đã xác nhận, chờ Leader Staff triển khai tại hiện trường."
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setConfirmingPlanId(null)} disabled={isUpdatingPlanStatus}>
-              Đóng
-            </Button>
-            <Button onClick={() => confirmingPlanId && handleConfirmPlan(confirmingPlanId)} isLoading={isUpdatingPlanStatus}>
-              Xác nhận
-            </Button>
-          </>
-        }
-      >
-        <div />
       </Modal>
 
       <Modal

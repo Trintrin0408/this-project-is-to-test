@@ -1550,3 +1550,35 @@ tồn đọng riêng, chưa xử lý ở lần sửa này.
 - **Trạng thái**: FE đã code xong và giữ nguyên nút trên web Manager — chờ Backend nới lỏng role trước
   khi test end-to-end thành công; hiện tại gọi thật từ web Manager sẽ nhận 403 cho tới khi Backend xử lý
   mục này.
+
+## (aj) `schedule_plans.status = 'CONFIRMED'` — đã chốt lại (2026-07-22): là Staff tự xác nhận qua mobile, không phải Manager bấm trên web
+
+- **Màn liên quan**: khối "Lịch thi công & đơn vị phụ trách kỹ thuật" (tab "Lịch trình & Kỹ thuật",
+  `/manager/orders/[id]`) — cùng chuỗi quyết định với mục (ah) (nơi đã chốt `IN_PROGRESS`/`COMPLETED`
+  tự suy từ check-in/check-out của `LEAD`, không còn là nút Manager bấm tay).
+- **Ý nghĩa `CONFIRMED` do người dùng xác nhận lại (2026-07-22)**: không phải "Manager duyệt kế hoạch"
+  như tài liệu cũ (`docs/lichtrinhkythuat_api.md` mục 6) mô tả, mà là **Staff (nhân sự được gán vào
+  plan) nhìn thấy kế hoạch, bấm nút để xác nhận sẵn sàng tham gia thực hiện — nhưng chưa ai bắt đầu
+  làm**. Tức đây cũng là hành động của Staff qua mobile, giống hệt mẫu hình đã áp dụng cho
+  `IN_PROGRESS`/`COMPLETED` ở mục (ah), không phải hành động Manager.
+- **Đã sửa trên web Manager (2026-07-22)**: bỏ hẳn nút **"Xác nhận kế hoạch"** + modal xác nhận +
+  `handleConfirmPlan` khỏi `src/app/manager/orders/[id]/page.tsx` (endpoint
+  `PATCH /schedule-plans/:id/status {status:'CONFIRMED'}` **vẫn giữ nguyên, không đổi** — chỉ đổi phía
+  gọi từ "web Manager" sang "mobile Staff", đúng pattern đã áp dụng cho `IN_PROGRESS`/`COMPLETED`).
+  **Hành động ghi thật duy nhất còn lại của Manager trên web ở tab này giờ chỉ còn "Hủy"**
+  (`CANCELLED`) — không còn hành động ghi nào khác cho `schedule_plans.status`.
+- **Chưa chốt — cần Backend/Product xác nhận thêm**:
+  1. "Staff" ở đây là **assignee nào** — chỉ `LEAD` (giống rule đã chốt cho check-in/out ở mục (ah)),
+     hay **bất kỳ assignee nào** (kể cả `TECHNICAL`) bấm cũng đủ để chuyển `CONFIRMED`? Nếu nhiều người
+     cùng phải xác nhận mới coi là "sẵn sàng", schema hiện tại (`schedule_plans.status` chỉ 1 cột dùng
+     chung, không phải theo từng assignee) **không đủ để lưu trạng thái "ai đã xác nhận, ai chưa"** —
+     cần Backend làm rõ có bảng/cột nào khác lưu việc này không, hay tạm chấp nhận theo đúng rule đã có
+     (chỉ `LEAD` xác nhận là đủ, tương tự check-in/out).
+  2. Cần xác nhận **mobile gọi đúng endpoint nào** — tái dùng `PATCH /schedule-plans/:id/status
+     {status:'CONFIRMED'}` sẵn có (đơn giản nhất, không cần Backend làm gì thêm), hay Backend muốn tách
+     riêng thành 1 endpoint mới cùng nhóm với `POST .../assignees/:userId/check-in` (mục (ah)) cho nhất
+     quán về pattern URL?
+- **Trạng thái**: FE đã bỏ nút khỏi web Manager (không còn hành động ghi `CONFIRMED` nào trên web) —
+  cần Backend/Product xác nhận 2 điểm trên trước khi mobile code phần "Staff xác nhận sẵn sàng tham
+  gia". `docs/lichtrinhkythuat_api.md` mục 0/6 cần rà soát lại cho khớp (đang mô tả ngược — ghi là hành
+  động Manager) khi có dịp cập nhật file đó, chưa tự sửa trong lần này.
