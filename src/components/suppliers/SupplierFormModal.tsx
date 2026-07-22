@@ -4,9 +4,18 @@ import { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import type { AdminSupplier, AdminSupplierFormValues } from '@/mocks/db/suppliers';
+import type { Supplier } from '@/types/supplier';
 
-const EMPTY_FORM: AdminSupplierFormValues = {
+export interface SupplierFormValues {
+  supplierCode: string;
+  supplierName: string;
+  contactPerson?: string;
+  phone?: string;
+  address?: string;
+  serviceType: string;
+}
+
+const EMPTY_FORM: SupplierFormValues = {
   supplierCode: '',
   supplierName: '',
   contactPerson: '',
@@ -18,9 +27,9 @@ const EMPTY_FORM: AdminSupplierFormValues = {
 interface SupplierFormModalProps {
   isOpen: boolean;
   mode: 'create' | 'edit';
-  supplier: AdminSupplier | null;
+  supplier: Supplier | null;
   onClose: () => void;
-  onSubmit: (values: AdminSupplierFormValues) => void;
+  onSubmit: (values: SupplierFormValues) => void;
 }
 
 /** Modal Thêm/Sửa đối tác — dùng chung cho /admin/suppliers và /manager/suppliers (trước đây khai
@@ -29,7 +38,7 @@ interface SupplierFormModalProps {
  * không có `email`), chỉ khác là vẫn ghi qua mock CRUD (`createAdminSupplier`/`updateAdminSupplier`)
  * thay vì `supplierApiService` vì `GET/PUT /suppliers` chưa có route mock lẫn backend thật. */
 export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }: Readonly<SupplierFormModalProps>) {
-  const [values, setValues] = useState<AdminSupplierFormValues>(EMPTY_FORM);
+  const [values, setValues] = useState<SupplierFormValues>(EMPTY_FORM);
   const [error, setError] = useState('');
   const [wasOpen, setWasOpen] = useState(isOpen);
 
@@ -42,9 +51,9 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
           ? {
               supplierCode: supplier.supplierCode,
               supplierName: supplier.supplierName,
-              contactPerson: supplier.contactPerson,
-              phone: supplier.phone,
-              address: supplier.address,
+              contactPerson: supplier.contactPerson ?? '',
+              phone: supplier.phone ?? '',
+              address: supplier.address ?? '',
               serviceType: supplier.serviceType,
             }
           : EMPTY_FORM,
@@ -57,7 +66,13 @@ export function SupplierFormModal({ isOpen, mode, supplier, onClose, onSubmit }:
       setError('Vui lòng nhập đủ mã, tên và phân loại đối tác');
       return;
     }
-    onSubmit(values);
+    const cleanValues = {
+      ...values,
+      contactPerson: values.contactPerson?.trim() || undefined,
+      phone: values.phone?.trim() || undefined,
+      address: values.address?.trim() || undefined,
+    };
+    onSubmit(cleanValues);
   };
 
   return (

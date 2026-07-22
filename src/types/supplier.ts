@@ -17,6 +17,7 @@ export interface Supplier {
   status: SupplierStatus;
   createdAt: string;
   updatedAt: string;
+  debtBalance: number;
 }
 
 export interface CreateSupplierPayload {

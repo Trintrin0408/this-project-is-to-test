@@ -6,7 +6,7 @@ export const ROLES = {
 } as const;
 
 export const ROLE_DASHBOARD_PATH: Record<string, string> = {
-  Admin: '/admin/dashboard',
+  Admin: '/admin/settings/users',
   Manager: '/manager/dashboard',
 };
 

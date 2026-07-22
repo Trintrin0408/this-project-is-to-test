@@ -227,7 +227,7 @@ export default function Page() {
         </div>
       </Reveal>
 
-      <SupplierDetailModal supplier={detailSupplier} onClose={() => setDetailSupplier(null)} />
+      <SupplierDetailModal supplier={(detailSupplier as any) ?? null} onClose={() => setDetailSupplier(null)} />
 
       <OrderDetailModal transaction={detailTransaction} onClose={() => setDetailTransaction(null)} />
 

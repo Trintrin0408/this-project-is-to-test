@@ -201,12 +201,12 @@ export default function Page() {
       <SupplierFormModal
         isOpen={!!formModal}
         mode={formModal?.mode ?? 'create'}
-        supplier={formModal?.supplier ?? null}
+        supplier={(formModal?.supplier as any) ?? null}
         onClose={() => setFormModal(null)}
         onSubmit={handleSubmitForm}
       />
 
-      <SupplierDetailModal supplier={detailSupplier} onClose={() => setDetailSupplier(null)} />
+      <SupplierDetailModal supplier={(detailSupplier as any) ?? null} onClose={() => setDetailSupplier(null)} />
     </div>
   );
 }

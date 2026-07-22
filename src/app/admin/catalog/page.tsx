@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Search, Eye, Pencil, Trash2, Plus, SlidersHorizontal, FolderTree } from 'lucide-react';
+import { Search, Eye, Pencil, Trash2, Plus, FolderTree } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Pagination } from '@/components/ui/Pagination';
 import { Input } from '@/components/ui/Input';
@@ -12,13 +12,13 @@ import { Badge } from '@/components/ui/Badge';
 import { CatalogItemFormModal, CatalogItemFormValues } from '@/components/catalog/CatalogItemFormModal';
 import { CatalogItemDetailModal } from '@/components/catalog/CatalogItemDetailModal';
 import Reveal from '@/components/ui/Reveal';
-import { MOCK_CATEGORIES, MOCK_ITEMS, MOCK_TYPES } from '@/mocks/db/catalog';
+import { catalogApiService } from '@/services/catalog.service';
 import { usePagination } from '@/hooks/usePagination';
 import { useDebounce } from '@/hooks/useDebounce';
 import { usePermission } from '@/hooks/usePermission';
 import { formatDate } from '@/utils/formatDate';
 import { formatCurrency } from '@/utils/formatCurrency';
-import type { Item, ItemStatus } from '@/types/catalog';
+import type { Item, ItemStatus, ItemType, ItemCategory } from '@/types/catalog';
 
 const STATUS_LABEL: Record<ItemStatus, string> = {
   ACTIVE: 'Hoạt động',
@@ -31,30 +31,20 @@ const STATUS_OPTIONS = [
   { value: 'INACTIVE', label: 'Ngừng hoạt động' },
 ];
 
-let mockItemIdSeq = MOCK_ITEMS.length;
-function nextMockItemId(): string {
-  mockItemIdSeq += 1;
-  return `SP${String(mockItemIdSeq).padStart(3, '0')}`;
-}
-
-// ⚠️ Backend hiện không gọi được (docs/more-require.md mục (jj)) — trang này tạm dùng dữ liệu ảo cố
-// định ở src/mocks/catalogMocks.ts thay vì gọi catalogApiService. Tạo/sửa/xóa chỉ cập nhật state cục
-// bộ (mất khi tải lại trang), không gọi API thật. Khôi phục lại catalogApiService khi backend hoạt
-// động bình thường trở lại.
 export default function Page() {
   const { can } = usePermission();
   const canManage = can('master-data:manage');
 
-  const [items, setItems] = useState<Item[]>(MOCK_ITEMS);
-  const types = MOCK_TYPES;
-  const categories = MOCK_CATEGORIES;
+  const [items, setItems] = useState<Item[]>([]);
+  const [types, setTypes] = useState<ItemType[]>([]);
+  const [categories, setCategories] = useState<ItemCategory[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 400);
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [priceFilter, setPriceFilter] = useState('');
 
   const { pagination, setPage, updatePagination } = usePagination(10);
 
@@ -69,18 +59,38 @@ export default function Page() {
     return map;
   }, [types]);
 
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [itemsRes, typesRes, catRes] = await Promise.all([
+        catalogApiService.getItems(),
+        catalogApiService.getTypes(),
+        catalogApiService.getCategories(),
+      ]);
+      setItems(itemsRes.data ?? []);
+      setTypes(typesRes.data ?? []);
+      setCategories(catRes.data ?? []);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount, not a render loop
+    fetchData();
+  }, []);
+
   const filteredItems = useMemo(() => {
     const term = debouncedSearch.trim().toLowerCase();
     return items.filter((item) => {
-      if (categoryFilter && typeIdToCategoryId.get(item.typeId) !== categoryFilter) return false;
+      if (typeFilter && item.typeId !== typeFilter) return false;
       if (statusFilter && item.status !== statusFilter) return false;
-      if (priceFilter === 'under50k' && item.rentalPrice >= 50_000) return false;
-      if (priceFilter === '50kTo300k' && (item.rentalPrice < 50_000 || item.rentalPrice > 300_000)) return false;
-      if (priceFilter === 'above300k' && item.rentalPrice <= 300_000) return false;
       if (term && !(item.itemName.toLowerCase().includes(term) || item.itemId.toLowerCase().includes(term))) return false;
       return true;
     });
-  }, [items, debouncedSearch, categoryFilter, statusFilter, priceFilter, typeIdToCategoryId]);
+  }, [items, debouncedSearch, typeFilter, statusFilter]);
 
   useEffect(() => {
     updatePagination({
@@ -97,62 +107,50 @@ export default function Page() {
 
   const handleResetFilters = () => {
     setSearch('');
-    setCategoryFilter('');
+    setTypeFilter('');
     setStatusFilter('');
-    setPriceFilter('');
     setPage(1);
   };
 
-  const handleCreateSubmit = (values: CatalogItemFormValues) => {
-    const type = types.find((t) => t.typeId === values.typeId);
-    const newItem: Item = {
-      itemId: nextMockItemId(),
-      itemCode: values.itemCode,
-      itemName: values.itemName,
-      typeId: values.typeId,
-      typeName: type?.typeName,
-      description: values.description,
-      unit: values.unit,
-      rentalPrice: values.rentalPrice,
-      status: 'ACTIVE',
-      inventory: { quantityTotal: 0, quantityAvailable: 0 },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setItems((prev) => [newItem, ...prev]);
-    setFormModal(null);
+  const handleCreateSubmit = async (values: CatalogItemFormValues) => {
+    setIsSubmitting(true);
     setFormError('');
+    try {
+      await catalogApiService.createItem(values);
+      await fetchData();
+      setFormModal(null);
+    } catch (error) {
+      setFormError(getErrorMessage(error, 'Có lỗi xảy ra khi tạo thiết bị'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleEditSubmit = (values: CatalogItemFormValues, item: Item) => {
-    const type = types.find((t) => t.typeId === values.typeId);
-    setItems((prev) =>
-      prev.map((row) =>
-        row.itemId === item.itemId
-          ? {
-              ...row,
-              itemName: values.itemName,
-              description: values.description,
-              unit: values.unit,
-              rentalPrice: values.rentalPrice,
-              typeId: values.typeId,
-              typeName: type?.typeName,
-              updatedAt: new Date().toISOString(),
-            }
-          : row,
-      ),
-    );
-    setFormModal(null);
+  const handleEditSubmit = async (values: CatalogItemFormValues, item: Item) => {
+    setIsSubmitting(true);
     setFormError('');
+    try {
+      await catalogApiService.updateItem(item.itemId, values);
+      await fetchData();
+      setFormModal(null);
+    } catch (error) {
+      setFormError(getErrorMessage(error, 'Có lỗi xảy ra khi cập nhật thiết bị'));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDelete = (item: Item) => {
+  const handleDelete = async (item: Item) => {
     if (!window.confirm(`Xóa sản phẩm "${item.itemName}"? Hành động này không thể hoàn tác.`)) return;
-    setItems((prev) => prev.filter((row) => row.itemId !== item.itemId));
+    try {
+      await catalogApiService.updateItemStatus(item.itemId, { status: 'INACTIVE' });
+      await fetchData();
+    } catch (error) {
+      alert(getErrorMessage(error, 'Có lỗi xảy ra khi xóa thiết bị'));
+    }
   };
 
   const columns: TableColumn<Item>[] = [
-    { key: 'itemId', label: 'ID', render: (row) => <span className="font-semibold text-slate-400">{row.itemId}</span> },
     {
       key: 'itemName',
       label: 'Sản phẩm',
@@ -181,41 +179,44 @@ export default function Page() {
       key: 'actions',
       label: 'Thao tác',
       className: 'text-right',
-      render: (row) => (
-        <div className="flex items-center justify-end gap-1">
-          <button
-            type="button"
-            aria-label="Xem chi tiết"
-            title="Xem chi tiết"
-            onClick={() => setDetailItem(row)}
-            className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
-          {canManage && (
-            <>
-              <button
-                type="button"
-                aria-label="Chỉnh sửa"
-                title="Chỉnh sửa"
-                onClick={() => setFormModal({ mode: 'edit', item: row })}
-                className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-amber-50 hover:text-amber-600"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                aria-label="Xóa"
-                title="Xóa"
-                onClick={() => handleDelete(row)}
-                className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </>
-          )}
-        </div>
-      ),
+      render: (row) => {
+        if (row.status === 'INACTIVE') return null;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              aria-label="Xem chi tiết"
+              title="Xem chi tiết"
+              onClick={() => setDetailItem(row)}
+              className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
+            >
+              <Eye className="h-4 w-4" />
+            </button>
+            {canManage && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Chỉnh sửa"
+                  title="Chỉnh sửa"
+                  onClick={() => setFormModal({ mode: 'edit', item: row })}
+                  className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-amber-50 hover:text-amber-600"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Xóa"
+                  title="Xóa"
+                  onClick={() => handleDelete(row)}
+                  className="inline-flex rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -262,12 +263,12 @@ export default function Page() {
           </div>
           <div className="w-52">
             <Select
-              value={categoryFilter}
+              value={typeFilter}
               onChange={(e) => {
-                setCategoryFilter(e.target.value);
+                setTypeFilter(e.target.value);
                 setPage(1);
               }}
-              options={[{ value: '', label: 'Nhóm sản phẩm' }, ...categories.map((c) => ({ value: c.categoryId, label: c.categoryName }))]}
+              options={[{ value: '', label: 'Nhóm sản phẩm' }, ...types.map((t) => ({ value: t.typeId, label: t.typeName }))]}
             />
           </div>
           <div className="w-44">
@@ -280,44 +281,15 @@ export default function Page() {
               options={[{ value: '', label: 'Trạng thái' }, ...STATUS_OPTIONS]}
             />
           </div>
-          <Button
-            type="button"
-            variant={showAdvancedFilters ? 'primary' : 'secondary'}
-            onClick={() => setShowAdvancedFilters((v) => !v)}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            Bộ lọc
-          </Button>
-          {(search || categoryFilter || statusFilter || priceFilter) && (
+          {(search || typeFilter || statusFilter) && (
             <Button type="button" variant="ghost" onClick={handleResetFilters}>
               Đặt lại bộ lọc
             </Button>
           )}
         </div>
 
-        {showAdvancedFilters && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-            <span className="text-xs font-semibold text-slate-400">Giá thuê:</span>
-            <div className="w-56">
-              <Select
-                value={priceFilter}
-                onChange={(e) => {
-                  setPriceFilter(e.target.value);
-                  setPage(1);
-                }}
-                options={[
-                  { value: '', label: 'Tất cả mức giá' },
-                  { value: 'under50k', label: 'Dưới 50.000đ' },
-                  { value: '50kTo300k', label: 'Từ 50.000đ - 300.000đ' },
-                  { value: 'above300k', label: 'Trên 300.000đ' },
-                ]}
-              />
-            </div>
-          </div>
-        )}
-
         <div className="mt-4">
-          <Table columns={columns} rows={pageItems} rowKey={(row) => row.itemId} isLoading={false} />
+          <Table columns={columns} rows={pageItems} rowKey={(row) => row.itemId} isLoading={isLoading} />
         </div>
         <Pagination pagination={pagination} onPageChange={setPage} />
       </Reveal>
@@ -327,7 +299,7 @@ export default function Page() {
         mode={formModal?.mode ?? 'create'}
         item={formModal?.item}
         types={types}
-        isSubmitting={false}
+        isSubmitting={isSubmitting}
         errorMessage={formError}
         onClose={() => {
           setFormModal(null);
@@ -345,4 +317,12 @@ export default function Page() {
       <CatalogItemDetailModal isOpen={!!detailItem} item={detailItem} onClose={() => setDetailItem(null)} />
     </div>
   );
+}
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const response = (err as { response?: { data?: { message?: string } } }).response;
+    if (response?.data?.message) return response.data.message;
+  }
+  return fallback;
 }

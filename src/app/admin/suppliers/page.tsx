@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Truck, Search, Eye, Pencil, Lock, LockOpen, MapPin, Phone, Plus } from 'lucide-react';
 import { Table, TableColumn } from '@/components/ui/Table';
 import { Input } from '@/components/ui/Input';
@@ -10,15 +10,20 @@ import { SupplierDetailModal } from '@/components/suppliers/SupplierDetailModal'
 import { SupplierFormModal } from '@/components/suppliers/SupplierFormModal';
 import Reveal from '@/components/ui/Reveal';
 import { formatCurrency } from '@/utils/formatCurrency';
-import {
-  AdminSupplier,
-  AdminSupplierFormValues,
-  createAdminSupplier,
-  getAdminSuppliers,
-  toggleAdminSupplierStatus,
-  updateAdminSupplier,
-} from '@/mocks/db/suppliers';
-import type { SupplierStatus } from '@/types/supplier';
+import { supplierApiService } from '@/services/supplier.service';
+import { usePagination } from '@/hooks/usePagination';
+import { useDebounce } from '@/hooks/useDebounce';
+import type { Supplier, SupplierStatus } from '@/types/supplier';
+import { Pagination } from '@/components/ui/Pagination';
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const res = (err as any).response;
+    if (res?.data?.message) return res.data.message;
+  }
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
 
 // Trang thuần giao diện — xem giải thích ở đầu src/mocks/adminSuppliersMock.ts. Khớp ảnh mẫu "Danh
 // sách Nhà cung cấp đối tác": tìm kiếm + lọc trạng thái, bảng đối tác kèm công nợ, modal thêm/sửa và
@@ -27,45 +32,73 @@ import type { SupplierStatus } from '@/types/supplier';
 type StatusFilter = '' | SupplierStatus;
 
 export default function Page() {
-  const [suppliers, setSuppliers] = useState<AdminSupplier[]>(() => getAdminSuppliers());
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 400);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('');
 
-  const [formModal, setFormModal] = useState<{ mode: 'create' | 'edit'; supplier: AdminSupplier | null } | null>(null);
-  const [detailSupplier, setDetailSupplier] = useState<AdminSupplier | null>(null);
+  const { pagination, setPage, updatePagination } = usePagination(10);
 
-  const refresh = () => setSuppliers(getAdminSuppliers());
+  const [formModal, setFormModal] = useState<{ mode: 'create' | 'edit'; supplier: Supplier | null } | null>(null);
+  const [detailSupplier, setDetailSupplier] = useState<Supplier | null>(null);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return suppliers.filter((s) => {
-      if (statusFilter && s.status !== statusFilter) return false;
-      if (!term) return true;
-      return s.supplierName.toLowerCase().includes(term) || s.phone.toLowerCase().includes(term);
-    });
-  }, [suppliers, search, statusFilter]);
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const res = await supplierApiService.getSuppliers({
+        page: pagination.currentPage,
+        limit: pagination.limit,
+        search: debouncedSearch || undefined,
+        status: statusFilter || undefined,
+      });
+      setSuppliers(res.data ?? []);
+      updatePagination({
+        totalItems: res.meta.totalItems,
+        totalPages: Math.max(1, res.meta.totalPages),
+      });
+    } catch (error) {
+      console.error('Failed to fetch suppliers', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const handleToggleStatus = (supplier: AdminSupplier) => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(); }, [pagination.currentPage, pagination.limit, debouncedSearch, statusFilter]);
+
+  const handleToggleStatus = async (supplier: Supplier) => {
     const message =
       supplier.status === 'ACTIVE'
         ? `Khóa đối tác "${supplier.supplierName}"? Đối tác sẽ không được chọn cho giao dịch mới.`
         : `Mở khóa đối tác "${supplier.supplierName}"?`;
     if (!window.confirm(message)) return;
-    toggleAdminSupplierStatus(supplier.supplierId);
-    refresh();
-  };
-
-  const handleSubmitForm = (values: AdminSupplierFormValues) => {
-    if (formModal?.mode === 'edit' && formModal.supplier) {
-      updateAdminSupplier(formModal.supplier.supplierId, values);
-    } else {
-      createAdminSupplier(values);
+    try {
+      await supplierApiService.updateSupplier(supplier.supplierId, {
+        status: supplier.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+      });
+      fetchData();
+    } catch (error) {
+      alert(getErrorMessage(error, 'Lỗi khi cập nhật trạng thái'));
     }
-    refresh();
-    setFormModal(null);
   };
 
-  const columns: TableColumn<AdminSupplier>[] = [
+  const handleSubmitForm = async (values: any) => {
+    try {
+      if (formModal?.mode === 'edit' && formModal.supplier) {
+        await supplierApiService.updateSupplier(formModal.supplier.supplierId, values);
+      } else {
+        await supplierApiService.createSupplier(values);
+      }
+      setFormModal(null);
+      fetchData();
+    } catch (error) {
+      alert(getErrorMessage(error, 'Lỗi khi lưu nhà cung cấp'));
+    }
+  };
+
+  const columns: TableColumn<Supplier>[] = [
     { key: 'supplierCode', label: 'ID', render: (s) => <span className="font-semibold text-slate-500">{s.supplierCode}</span> },
     {
       key: 'name',
@@ -193,8 +226,17 @@ export default function Page() {
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          <Table columns={columns} rows={filtered} rowKey={(row) => row.supplierId} />
+          <Table columns={columns} rows={suppliers} rowKey={(row) => row.supplierId} isLoading={isLoading} />
         </div>
+
+        {pagination.totalPages > 1 && (
+          <div className="mt-4 flex justify-end">
+            <Pagination
+              pagination={pagination}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
       </Reveal>
 
       <SupplierFormModal

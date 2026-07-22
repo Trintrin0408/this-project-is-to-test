@@ -116,10 +116,17 @@ export function CatalogItemFormModal({
           required
           value={values.typeId}
           onChange={(e) => setValues((v) => ({ ...v, typeId: e.target.value }))}
-          options={types.map((t) => ({
-            value: t.typeId,
-            label: t.categoryName && t.categoryName !== t.typeName ? `${t.categoryName} — ${t.typeName}` : t.typeName,
-          }))}
+          options={Object.entries(
+            types.reduce(
+              (acc, t) => {
+                const cat = t.categoryName || 'Khác';
+                if (!acc[cat]) acc[cat] = [];
+                acc[cat].push({ value: t.typeId, label: t.typeName });
+                return acc;
+              },
+              {} as Record<string, { value: string; label: string }[]>
+            )
+          ).map(([cat, opts]) => ({ label: cat, options: opts }))}
           placeholder="-- Chọn nhóm sản phẩm --"
         />
         <Input label="Đơn vị tính" required value={values.unit} onChange={(e) => setValues((v) => ({ ...v, unit: e.target.value }))} />
@@ -133,7 +140,7 @@ export function CatalogItemFormModal({
           type="number"
           min={0}
           required
-          value={values.rentalPrice}
+          value={values.rentalPrice === 0 ? '' : values.rentalPrice}
           onChange={(e) => setValues((v) => ({ ...v, rentalPrice: Number(e.target.value) }))}
         />
 
